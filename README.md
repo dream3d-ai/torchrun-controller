@@ -2,6 +2,46 @@
 
 The Torchrun Controller provides Kubernetes-native management of distributed PyTorch training jobs using torchrun. It consists of two main components:
 
+## Motivation
+
+The Torchrun Controller addresses fundamental challenges in scaling ML training infrastructure by creating a clear separation of concerns between DevOps teams and ML practitioners. This separation enables both teams to work more efficiently:
+
+### For DevOps Teams
+
+- **Centralized Resource Management**: Define and manage compute resources, GPU allocations, and scheduling policies through TorchrunQueue resources
+- **Infrastructure as Code**: Control container images, dependencies, volume mounts, and worker coordination without touching training code
+- **Standardized Operations**: Enforce security policies, resource limits, and cluster best practices across all training jobs
+
+### For ML Practitioners
+
+- **Focus on Research**: Submit jobs with just a command and node count - no need to understand Kubernetes internals
+- **Rapid Iteration**: Local workspace syncing eliminates the Docker build/push cycle, enabling instant code changes
+- **Familiar Development**: Work in your local environment with your preferred tools, then seamlessly scale to the cluster
+
+### Key Differentiators
+
+**vs. TorchX**: TorchX builds a new Docker image for each run, leading to:
+
+- Slow iteration cycles waiting for builds
+- Registry bloat with thousands of temporary images
+- Complex cleanup of experimental artifacts
+
+**vs. Kubeflow**: Kubeflow Training Operator requires:
+
+- Single python file definitions with limited flexibility
+- Pre-built Docker images with all dependencies including a stable codebase
+
+**The Torchrun Controller Solution**:
+
+- **Two Simple Abstractions**:
+  - `TorchrunQueue`: Defines HOW jobs run (resources, images, policies)
+  - `TorchrunJob`: Defines WHAT runs (command, nodes, workspace)
+- **Local Workspace Syncing**: Your entire working directory is automatically packaged and mounted in pods
+- **Zero Docker Builds**: Iterate on code without rebuilding images
+- **Clean Separation**: DevOps configures queues, researchers submit jobs
+
+This design philosophy enables ML teams to maintain the fast iteration speed of local development while seamlessly scaling to multi-node distributed training on Kubernetes.
+
 ## Controllers
 
 ### TorchrunQueue Controller
