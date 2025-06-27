@@ -1,0 +1,204 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: torchrunqueues.torchrun.ai
+spec:
+  group: torchrun.ai
+  names:
+    kind: TorchrunQueue
+    listKind: TorchrunQueueList
+    plural: torchrunqueues
+    shortNames:
+    - jq
+    singular: torchrunqueue
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.queue.name
+      name: Queue
+      type: string
+    - jsonPath: .status.phase
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: TorchrunQueue is the Schema for the torchrunqueues API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: JobQueueSpec defines the desired state of JobQueue
+            properties:
+              podTemplate:
+                description: Pod template configuration
+                properties:
+                  metadata:
+                    description: Metadata to be added to pod
+                    properties:
+                      annotations:
+                        additionalProperties:
+                          type: string
+                        description: Annotations to add to pods
+                        type: object
+                      labels:
+                        additionalProperties:
+                          type: string
+                        description: Labels to add to pods
+                        type: object
+                    type: object
+                  spec:
+                    description: Pod spec template - can contain any valid pod spec
+                      fields
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+              queue:
+                description: kai-scheduler queue name this JobQueue maps to
+                properties:
+                  name:
+                    description: kai-scheduler queue name this JobQueue maps to
+                    type: string
+                  parentQueue:
+                    default: default
+                    description: kai-scheduler parent queue name this JobQueue maps
+                      to
+                    type: string
+                  resources:
+                    description: Resource quotas and limits for the queue
+                    properties:
+                      cpu:
+                        description: CPU resource configuration
+                        properties:
+                          limit:
+                            default: -1
+                            description: Resource limit for the queue
+                            type: integer
+                          overQuotaWeight:
+                            default: 1
+                            description: Over quota weight for the queue
+                            type: integer
+                          quota:
+                            default: -1
+                            description: Resource quota for the queue
+                            type: integer
+                        type: object
+                      gpu:
+                        description: GPU resource configuration
+                        properties:
+                          limit:
+                            default: -1
+                            description: Resource limit for the queue
+                            type: integer
+                          overQuotaWeight:
+                            default: 1
+                            description: Over quota weight for the queue
+                            type: integer
+                          quota:
+                            default: -1
+                            description: Resource quota for the queue
+                            type: integer
+                        type: object
+                      memory:
+                        description: Memory resource configuration
+                        properties:
+                          limit:
+                            default: -1
+                            description: Resource limit for the queue
+                            type: integer
+                          overQuotaWeight:
+                            default: 1
+                            description: Over quota weight for the queue
+                            type: integer
+                          quota:
+                            default: -1
+                            description: Resource quota for the queue
+                            type: integer
+                        type: object
+                    type: object
+                required:
+                - name
+                type: object
+              serviceAccountName:
+                default: default
+                description: Service account name
+                type: string
+            required:
+            - queue
+            type: object
+          status:
+            description: JobQueueStatus defines the observed state of JobQueue
+            properties:
+              conditions:
+                description: Conditions
+                items:
+                  description: JobQueueCondition describes the state of a JobQueue
+                  properties:
+                    lastTransitionTime:
+                      description: Last time the condition transitioned
+                      format: date-time
+                      type: string
+                    message:
+                      description: A human-readable message about the transition
+                      type: string
+                    reason:
+                      description: The reason for the condition's last transition
+                      type: string
+                    status:
+                      description: Status of the condition
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: Type of condition
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastUpdateTime:
+                description: Last time the status was updated
+                format: date-time
+                type: string
+              observedGeneration:
+                description: Last observed generation
+                format: int64
+                type: integer
+              phase:
+                default: Active
+                description: Phase of the JobQueue
+                enum:
+                - Active
+                - Updating
+                - Terminating
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
