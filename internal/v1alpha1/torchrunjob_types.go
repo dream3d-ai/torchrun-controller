@@ -37,13 +37,6 @@ type TorchrunJobSpec struct {
 	// Workspace storage configuration
 	WorkspaceStorage WorkspaceStorage `json:"workspaceStorage,omitempty"`
 
-	// Working directory (overrides JobQueue default)
-	// +kubebuilder:default="/app"
-	WorkingDir string `json:"workingDir,omitempty"`
-
-	// Distributed training configuration
-	Distributed DistributedConfig `json:"distributed,omitempty"`
-
 	// Reliability and lifecycle settings
 	Reliability ReliabilityConfig `json:"reliability,omitempty"`
 
@@ -91,29 +84,6 @@ type WorkspaceStorage struct {
 
 	// Storage class name
 	StorageClass string `json:"storageClass,omitempty"`
-}
-
-// DistributedConfig defines distributed training configuration
-type DistributedConfig struct {
-	// PyTorch distributed backend
-	// +kubebuilder:validation:Enum=nccl;gloo;mpi
-	// +kubebuilder:default="nccl"
-	Backend string `json:"backend,omitempty"`
-
-	// Rendezvous backend for torchrun
-	// +kubebuilder:validation:Enum=etcd-v2;c10d;static
-	// +kubebuilder:default="etcd-v2"
-	RdzvBackend string `json:"rdzvBackend,omitempty"`
-
-	// Rendezvous endpoint (e.g., etcd service)
-	// +kubebuilder:default="etcd.etcd-system.svc.cluster.local:2379"
-	RdzvEndpoint string `json:"rdzvEndpoint,omitempty"`
-
-	// Port for distributed training
-	// +kubebuilder:validation:Minimum=1024
-	// +kubebuilder:validation:Maximum=65535
-	// +kubebuilder:default=29500
-	Port int32 `json:"port,omitempty"`
 }
 
 // ReliabilityConfig defines reliability and lifecycle settings
@@ -186,9 +156,6 @@ type TorchrunJobStatus struct {
 
 	// Worker pod status
 	Workers WorkerStatus `json:"workers,omitempty"`
-
-	// Master endpoint for distributed training
-	MasterEndpoint string `json:"masterEndpoint,omitempty"`
 
 	// Number of restart attempts
 	Restarts int32 `json:"restarts,omitempty"`

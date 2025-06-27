@@ -1,0 +1,37 @@
+1. Get the application status by running these commands:
+   kubectl --namespace {{ include "torchrun-controller.namespace" . }} get deployments -l "app.kubernetes.io/name={{ include "torchrun-controller.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+2. Verify the controller is running:
+   kubectl --namespace {{ include "torchrun-controller.namespace" . }} get pods -l "app.kubernetes.io/name={{ include "torchrun-controller.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+3. Check the created queues:
+   kubectl get torchrunqueues --all-namespaces
+
+4. To create a TorchrunJob, use:
+   kubectl apply -f - <<EOF
+   apiVersion: torchrun.ai/v1alpha1
+   kind: TorchrunJob
+   metadata:
+     name: my-training-job
+     namespace: default
+   spec:
+     queue: {{ (index .Values.queues.items 0).queue.name }}
+     image: my-training-image:latest
+     workers: 2
+     script: train.py
+     args:
+       - --epochs=100
+       - --batch-size=32
+   EOF
+
+5. Monitor your jobs:
+   kubectl get torchrunjobs --all-namespaces
+
+{{ if .Values.queues.enabled }}
+Created Queues:
+{{- range .Values.queues.items }}
+  - {{ .name }} in namespace {{ .namespace | default $.Release.Namespace }} (kai-scheduler queue: {{ .queue.name }})
+{{- end }}
+{{ end }}
+
+For more information, visit: https://github.com/dream3d-ai/dream3d/tree/main/k8s/torchrun-controller 

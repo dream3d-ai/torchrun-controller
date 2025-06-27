@@ -1,0 +1,183 @@
+# Default values for torchrun-controller
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Controller configuration
+controller:
+  # -- Number of controller replicas
+  replicaCount: 1
+  
+  image:
+    # -- Controller image repository
+    repository: dream3dml/torchrun-controller
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+    # -- Overrides the image tag whose default is the chart appVersion
+    tag: ""
+  
+  # -- Image pull secrets
+  imagePullSecrets: []
+  
+  # -- Service account name (will be created if not specified)
+  serviceAccountName: ""
+  
+  # -- Pod annotations
+  podAnnotations: {}
+  
+  # -- Pod security context
+  podSecurityContext:
+    runAsNonRoot: true
+  
+  # -- Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - "ALL"
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+  
+  # -- Resource limits and requests
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+  
+  # -- Node selector
+  nodeSelector: {}
+  
+  # -- Tolerations
+  tolerations: []
+  
+  # -- Affinity rules
+  affinity: {}
+  
+  # -- Additional CLI arguments for the controller
+  args:
+    - --leader-elect
+  
+  # -- Liveness probe configuration
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8081
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  
+  # -- Readiness probe configuration
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  
+  # -- Termination grace period in seconds
+  terminationGracePeriodSeconds: 10
+
+# Namespace configuration
+namespace:
+  # -- Create namespace if it doesn't exist
+  create: true
+  # -- Namespace name
+  name: torchrun-system
+
+# Queue configuration
+queues:
+  # -- Enable creation of default queues
+  enabled: true
+  # -- List of queues to create
+  items:
+    - name: default
+      namespace: default
+      queue:
+        name: default
+        parentQueue: root
+        resources:
+          gpu:
+            quota: -1
+            limit: -1
+          cpu:
+            quota: -1
+            limit: -1
+          memory:
+            quota: -1
+            limit: -1
+      serviceAccountName: default
+      podTemplate:
+        spec:
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Equal"
+              effect: "NoSchedule"
+    
+    - name: high-priority
+      namespace: default
+      queue:
+        name: high-priority
+        parentQueue: root
+        resources:
+          gpu:
+            quota: 8
+            limit: 16
+            overQuotaWeight: 2
+      podTemplate:
+        spec:
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Equal"
+              effect: "NoSchedule"
+          nodeSelector:
+            node.kubernetes.io/gpu-type: "h100"
+    
+    - name: low-priority
+      namespace: default
+      queue:
+        name: low-priority
+        parentQueue: root
+        resources:
+          gpu:
+            quota: 4
+            limit: 8
+            overQuotaWeight: 1
+      podTemplate:
+        spec:
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Equal"
+              effect: "NoSchedule"
+
+# RBAC configuration
+rbac:
+  # -- Create RBAC resources
+  create: true
+  
+  # -- Additional rules to add to the controller's ClusterRole
+  additionalRules: []
+  # Example:
+  # - apiGroups: [""]
+  #   resources: ["configmaps"]
+  #   verbs: ["get", "list", "watch"]
+
+# ServiceMonitor configuration for Prometheus monitoring
+serviceMonitor:
+  # -- Enable ServiceMonitor creation
+  enabled: false
+  # -- Interval at which metrics should be scraped
+  interval: 30s
+  # -- Namespace to create ServiceMonitor in
+  namespace: ""
+  # -- Additional labels for ServiceMonitor
+  labels: {}
+
+# Webhook configuration (if webhooks are enabled in the controller)
+webhook:
+  # -- Enable webhook
+  enabled: false
+  # -- Webhook port
+  port: 9443
+  # -- Certificate directory
+  certDir: /tmp/k8s-webhook-server/serving-certs 

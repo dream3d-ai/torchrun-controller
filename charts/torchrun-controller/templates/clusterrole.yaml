@@ -1,0 +1,135 @@
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "torchrun-controller.fullname" . }}-manager-role
+  labels:
+    {{- include "torchrun-controller.labels" . | nindent 4 }}
+rules:
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - scheduling.run.ai
+  resources:
+  - queues
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - torchrun.ai
+  resources:
+  - torchrunjobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - torchrun.ai
+  resources:
+  - torchrunjobs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - torchrun.ai
+  resources:
+  - torchrunjobs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - torchrun.ai
+  resources:
+  - torchrunqueues
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - torchrun.ai
+  resources:
+  - torchrunqueues/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - torchrun.ai
+  resources:
+  - torchrunqueues/status
+  verbs:
+  - get
+  - patch
+  - update
+{{- with .Values.rbac.additionalRules }}
+{{- toYaml . | nindent 0 }}
+{{- end }}
+{{- end }} 

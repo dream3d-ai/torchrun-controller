@@ -1,0 +1,160 @@
+# Example values file for torchrun-controller
+# This demonstrates various customization options
+
+# Use a custom namespace
+namespace:
+  create: true
+  name: ml-platform
+
+# Controller configuration for production
+controller:
+  replicaCount: 2  # HA setup
+  
+  image:
+    repository: dream3dml/torchrun-controller
+    tag: "v1.0.0"  # Pin to specific version
+    pullPolicy: Always
+  
+  # Use image pull secrets for private registries
+  imagePullSecrets:
+    - name: regcred
+  
+  # Production-grade resource allocation
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  
+  # Schedule on control-plane nodes
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+  
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  
+  # Anti-affinity for HA
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - torchrun-controller
+            topologyKey: kubernetes.io/hostname
+
+# Custom queue configuration for different teams
+queues:
+  enabled: true
+  items:
+    # Research team queue with H100 GPUs
+    - name: research-queue
+      namespace: research
+      queue:
+        name: research
+        parentQueue: root
+        resources:
+          gpu:
+            quota: 32  # 32 H100 GPUs
+            limit: 48  # Allow bursting up to 48
+            overQuotaWeight: 2
+          cpu:
+            quota: 512
+            limit: 768
+          memory:
+            quota: 4096  # 4TB
+            limit: 6144  # 6TB
+      serviceAccountName: research-sa
+      podTemplate:
+        metadata:
+          labels:
+            team: research
+            gpu-type: h100
+        spec:
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Equal"
+              value: "h100"
+              effect: "NoSchedule"
+          nodeSelector:
+            node.kubernetes.io/gpu-type: "h100"
+            node.kubernetes.io/instance-type: "p5.48xlarge"
+    
+    # Production inference queue
+    - name: inference-queue
+      namespace: production
+      queue:
+        name: inference
+        parentQueue: root
+        resources:
+          gpu:
+            quota: 16  # 16 A100 GPUs
+            limit: 24
+            overQuotaWeight: 3  # Higher priority
+      podTemplate:
+        spec:
+          priorityClassName: high-priority
+          tolerations:
+            - key: "workload"
+              operator: "Equal"
+              value: "inference"
+              effect: "NoSchedule"
+          nodeSelector:
+            workload: inference
+    
+    # Development queue with limited resources
+    - name: dev-queue
+      namespace: development
+      queue:
+        name: development
+        parentQueue: root
+        resources:
+          gpu:
+            quota: 4
+            limit: 8
+            overQuotaWeight: 1  # Lower priority
+          cpu:
+            quota: 64
+            limit: 128
+      podTemplate:
+        spec:
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+
+# Enable RBAC with additional permissions
+rbac:
+  create: true
+  additionalRules:
+    # Allow reading ConfigMaps for dynamic configuration
+    - apiGroups: [""]
+      resources: ["configmaps"]
+      verbs: ["get", "list", "watch"]
+    # Allow managing NetworkPolicies for job isolation
+    - apiGroups: ["networking.k8s.io"]
+      resources: ["networkpolicies"]
+      verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+
+# Enable Prometheus monitoring
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+
+# Enable webhook for validation
+webhook:
+  enabled: true
+  port: 9443
+  certDir: /tmp/k8s-webhook-server/serving-certs 

@@ -62,6 +62,7 @@ func (in *JobQueueCondition) DeepCopy() *JobQueueCondition {
 func (in *JobQueueSpec) DeepCopyInto(out *JobQueueSpec) {
 	*out = *in
 	out.Queue = in.Queue
+	out.Distributed = in.Distributed
 	in.PodTemplateConfig.DeepCopyInto(&out.PodTemplateConfig)
 }
 
@@ -303,7 +304,6 @@ func (in *TorchrunJobList) DeepCopyObject() runtime.Object {
 func (in *TorchrunJobSpec) DeepCopyInto(out *TorchrunJobSpec) {
 	*out = *in
 	out.WorkspaceStorage = in.WorkspaceStorage
-	out.Distributed = in.Distributed
 	in.Reliability.DeepCopyInto(&out.Reliability)
 	if in.Env != nil {
 		in, out := &in.Env, &out.Env

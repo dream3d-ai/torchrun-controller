@@ -145,8 +145,8 @@ func (jm *JobManager) buildTorchrunCommand(job *torchrunv1alpha1.TorchrunJob, jq
 			"--node_rank", "$(JOB_COMPLETION_INDEX)",
 			"--nnodes", strconv.Itoa(job.Spec.NumNodes),
 			"--nproc_per_node", strconv.Itoa(nproc),
-			"--rdzv_backend", job.Spec.Distributed.RdzvBackend,
-			"--rdzv_endpoint", job.Spec.Distributed.RdzvEndpoint,
+			"--rdzv_backend", jq.Spec.Distributed.RdzvBackend,
+			"--rdzv_endpoint", jq.Spec.Distributed.RdzvEndpoint,
 			"--rdzv_id", job.Status.JobID,
 			"--no-python",
 		)
@@ -155,8 +155,8 @@ func (jm *JobManager) buildTorchrunCommand(job *torchrunv1alpha1.TorchrunJob, jq
 		cmdParts = append(cmdParts,
 			"--standalone",
 			"--nproc_per_node", strconv.Itoa(nproc),
-			"--rdzv_backend", job.Spec.Distributed.RdzvBackend,
-			"--rdzv_endpoint", job.Spec.Distributed.RdzvEndpoint,
+			"--rdzv_backend", jq.Spec.Distributed.RdzvBackend,
+			"--rdzv_endpoint", jq.Spec.Distributed.RdzvEndpoint,
 			"--rdzv_id", job.Status.JobID,
 			"--no-python",
 		)

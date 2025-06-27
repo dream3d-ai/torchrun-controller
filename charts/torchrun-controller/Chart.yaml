@@ -1,0 +1,30 @@
+apiVersion: v2
+name: torchrun-controller
+description: A Helm chart for deploying the Torchrun Controller and Queue resources
+type: application
+version: 0.1.0
+appVersion: "latest"
+home: https://github.com/dream3d-ai/dream3d
+sources:
+  - https://github.com/dream3d-ai/dream3d/tree/main/k8s/torchrun-controller
+maintainers:
+  - name: Dream3D Team
+    email: support@dream3d.ai
+keywords:
+  - torchrun
+  - pytorch
+  - distributed-training
+  - kubernetes
+  - controller
+  - kai-scheduler
+annotations:
+  # For Artifacthub.io users
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Full Lifecycle
+  artifacthub.io/crds: |
+    - kind: TorchrunJob
+      version: v1alpha1
+      description: TorchrunJob manages distributed PyTorch training jobs
+    - kind: TorchrunQueue  
+      version: v1alpha1
+      description: TorchrunQueue maps to kai-scheduler queues for resource management 

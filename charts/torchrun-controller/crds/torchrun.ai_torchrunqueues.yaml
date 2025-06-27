@@ -51,37 +51,6 @@ spec:
           spec:
             description: JobQueueSpec defines the desired state of JobQueue
             properties:
-              distributed:
-                description: Distributed training configuration
-                properties:
-                  backend:
-                    default: nccl
-                    description: PyTorch distributed backend
-                    enum:
-                    - nccl
-                    - gloo
-                    - mpi
-                    type: string
-                  port:
-                    default: 29500
-                    description: Port for distributed training
-                    format: int32
-                    maximum: 65535
-                    minimum: 1024
-                    type: integer
-                  rdzvBackend:
-                    default: etcd-v2
-                    description: Rendezvous backend for torchrun
-                    enum:
-                    - etcd-v2
-                    - c10d
-                    - static
-                    type: string
-                  rdzvEndpoint:
-                    default: etcd.etcd-system.svc.cluster.local:2379
-                    description: Rendezvous endpoint (e.g., etcd service)
-                    type: string
-                type: object
               podTemplate:
                 description: Pod template configuration
                 properties:

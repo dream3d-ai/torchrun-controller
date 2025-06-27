@@ -1,0 +1,10 @@
+{{- if .Values.namespace.create }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: controller-manager
+    {{- include "torchrun-controller.labels" . | nindent 4 }}
+  name: {{ include "torchrun-controller.namespace" . }}
+{{- end }} 

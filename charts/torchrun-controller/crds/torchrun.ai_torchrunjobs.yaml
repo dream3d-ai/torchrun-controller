@@ -66,6 +66,37 @@ spec:
               command:
                 description: Training command to execute
                 type: string
+              distributed:
+                description: Distributed training configuration
+                properties:
+                  backend:
+                    default: nccl
+                    description: PyTorch distributed backend
+                    enum:
+                    - nccl
+                    - gloo
+                    - mpi
+                    type: string
+                  port:
+                    default: 29500
+                    description: Port for distributed training
+                    format: int32
+                    maximum: 65535
+                    minimum: 1024
+                    type: integer
+                  rdzvBackend:
+                    default: etcd-v2
+                    description: Rendezvous backend for torchrun
+                    enum:
+                    - etcd-v2
+                    - c10d
+                    - static
+                    type: string
+                  rdzvEndpoint:
+                    default: etcd.etcd-system.svc.cluster.local:2379
+                    description: Rendezvous endpoint (e.g., etcd service)
+                    type: string
+                type: object
               env:
                 description: Additional environment variables (merged with JobQueue
                   env)
@@ -1946,6 +1977,10 @@ spec:
                       type: object
                     type: array
                 type: object
+              workingDir:
+                default: /app
+                description: Working directory (overrides JobQueue default)
+                type: string
               workspaceStorage:
                 description: Workspace storage configuration
                 properties:
@@ -2036,6 +2071,9 @@ spec:
               lastReconcileTime:
                 description: Last time the job was reconciled
                 format: date-time
+                type: string
+              masterEndpoint:
+                description: Master endpoint for distributed training
                 type: string
               numNodes:
                 description: Number of nodes for training

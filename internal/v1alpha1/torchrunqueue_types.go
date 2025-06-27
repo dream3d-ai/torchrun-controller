@@ -10,6 +10,9 @@ type JobQueueSpec struct {
 	// kai-scheduler queue name this JobQueue maps to
 	Queue QueueConfig `json:"queue"`
 
+	// Distributed training configuration
+	Distributed DistributedConfig `json:"distributed,omitempty"`
+
 	// Pod template configuration
 	PodTemplateConfig PodTemplateConfig `json:"podTemplate,omitempty"`
 
@@ -56,6 +59,29 @@ type ResourceConfig struct {
 	// Over quota weight for the queue
 	// +kubebuilder:default=1
 	OverQuotaWeight int `json:"overQuotaWeight,omitempty"`
+}
+
+// DistributedConfig defines distributed training configuration
+type DistributedConfig struct {
+	// PyTorch distributed backend
+	// +kubebuilder:validation:Enum=nccl;gloo;mpi
+	// +kubebuilder:default="nccl"
+	Backend string `json:"backend,omitempty"`
+
+	// Rendezvous backend for torchrun
+	// +kubebuilder:validation:Enum=etcd-v2;c10d;static
+	// +kubebuilder:default="etcd-v2"
+	RdzvBackend string `json:"rdzvBackend,omitempty"`
+
+	// Rendezvous endpoint (e.g., etcd service)
+	// +kubebuilder:default="etcd.etcd-system.svc.cluster.local:2379"
+	RdzvEndpoint string `json:"rdzvEndpoint,omitempty"`
+
+	// Port for distributed training
+	// +kubebuilder:validation:Minimum=1024
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:default=29500
+	Port int32 `json:"port,omitempty"`
 }
 
 // PodTemplateConfig defines the pod template for jobs

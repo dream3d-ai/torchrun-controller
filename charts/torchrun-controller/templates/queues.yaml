@@ -1,0 +1,40 @@
+{{- if .Values.queues.enabled }}
+{{- range .Values.queues.items }}
+---
+apiVersion: torchrun.ai/v1alpha1
+kind: TorchrunQueue
+metadata:
+  name: {{ .name }}
+  namespace: {{ .namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "torchrun-controller.labels" $ | nindent 4 }}
+spec:
+  queue:
+    name: {{ .queue.name }}
+    {{- if .queue.parentQueue }}
+    parentQueue: {{ .queue.parentQueue }}
+    {{- end }}
+    {{- if .queue.resources }}
+    resources:
+      {{- if .queue.resources.cpu }}
+      cpu:
+        {{- toYaml .queue.resources.cpu | nindent 8 }}
+      {{- end }}
+      {{- if .queue.resources.gpu }}
+      gpu:
+        {{- toYaml .queue.resources.gpu | nindent 8 }}
+      {{- end }}
+      {{- if .queue.resources.memory }}
+      memory:
+        {{- toYaml .queue.resources.memory | nindent 8 }}
+      {{- end }}
+    {{- end }}
+  {{- if .serviceAccountName }}
+  serviceAccountName: {{ .serviceAccountName }}
+  {{- end }}
+  {{- if .podTemplate }}
+  podTemplate:
+    {{- toYaml .podTemplate | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }} 
