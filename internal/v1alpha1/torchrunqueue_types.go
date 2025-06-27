@@ -19,6 +19,9 @@ type JobQueueSpec struct {
 	// Service account name
 	// +kubebuilder:default="default"
 	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// Resources to be created for this queue (PVCs, ConfigMaps, Secrets, etc.)
+	Resources []ResourceTemplate `json:"resources,omitempty"`
 }
 
 // QueueConfig defines the kai-scheduler queue configuration
@@ -104,6 +107,26 @@ type PodMetadata struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
+// ResourceTemplate defines a Kubernetes resource to be created for the queue
+type ResourceTemplate struct {
+	// Name of the resource (will be used as-is or as a prefix)
+	Name string `json:"name"`
+
+	// NameMode defines how the name should be used
+	// +kubebuilder:validation:Enum=exact;prefix
+	// +kubebuilder:default="exact"
+	NameMode string `json:"nameMode,omitempty"`
+
+	// The resource object - can be any valid Kubernetes resource
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Type=object
+	Template runtime.RawExtension `json:"template"`
+
+	// Immutable indicates if the resource should not be updated after creation
+	// +kubebuilder:default=false
+	Immutable bool `json:"immutable,omitempty"`
+}
+
 // JobQueueStatus defines the observed state of JobQueue
 type JobQueueStatus struct {
 	// Phase of the JobQueue
@@ -119,6 +142,12 @@ type JobQueueStatus struct {
 
 	// Conditions
 	Conditions []JobQueueCondition `json:"conditions,omitempty"`
+
+	// ResourcesReady indicates if all queue resources are ready
+	ResourcesReady bool `json:"resourcesReady,omitempty"`
+
+	// ResourceStatus tracks the status of each resource
+	ResourceStatuses []ResourceStatus `json:"resourceStatuses,omitempty"`
 }
 
 // JobQueueCondition describes the state of a JobQueue
@@ -140,11 +169,26 @@ type JobQueueCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
+// ResourceStatus tracks the status of a queue resource
+type ResourceStatus struct {
+	// Name of the resource
+	Name string `json:"name"`
+
+	// Kind of the resource
+	Kind string `json:"kind"`
+
+	// Ready indicates if the resource is ready
+	Ready bool `json:"ready"`
+
+	// Message provides additional information
+	Message string `json:"message,omitempty"`
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=jq
+// +kubebuilder:resource:shortName=trq
 // +kubebuilder:printcolumn:name="Queue",type="string",JSONPath=".spec.queue.name"
-// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // TorchrunQueue is the Schema for the torchrunqueues API

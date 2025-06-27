@@ -75,7 +75,7 @@ func (jm *JobManager) CreateJob(ctx context.Context, job *torchrunv1alpha1.Torch
 				"app":                     "torchrun",
 				"torchrun.ai/job-id":      job.Status.JobID,
 				"torchrun.ai/job-name":    job.Status.JobName,
-				"torchrun.ai/job-queue":   job.Spec.JobQueue,
+				"torchrun.ai/job-queue":   job.Spec.Queue,
 				"scheduling.kai.io/queue": jq.Spec.Queue.Name,
 			},
 			OwnerReferences: []metav1.OwnerReference{
@@ -277,7 +277,7 @@ func (jm *JobManager) buildPodLabels(job *torchrunv1alpha1.TorchrunJob, jq *torc
 	labels := map[string]string{
 		"app":                     "torchrun",
 		"torchrun.ai/job-name":    job.Name,
-		"torchrun.ai/job-queue":   job.Spec.JobQueue,
+		"torchrun.ai/job-queue":   job.Spec.Queue,
 		"scheduling.kai.io/queue": jq.Spec.Queue.Name,
 	}
 

@@ -21,8 +21,8 @@ const (
 
 // TorchrunJobSpec defines the desired state of TorchrunJob
 type TorchrunJobSpec struct {
-	// Name of the JobQueue to use for this job
-	JobQueue string `json:"jobQueue"`
+	// Name of the TorchrunQueue to use for this job
+	Queue string `json:"queue"`
 
 	// Training command to execute
 	Command string `json:"command"`
@@ -211,7 +211,7 @@ type TorchrunJobCondition struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=tj;trj
-// +kubebuilder:printcolumn:name="JobQueue",type="string",JSONPath=".spec.jobQueue"
+// +kubebuilder:printcolumn:name="Queue",type="string",JSONPath=".spec.queue"
 // +kubebuilder:printcolumn:name="Nodes",type="integer",JSONPath=".spec.numNodes"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Workers",type="string",JSONPath=".status.workersStatus"

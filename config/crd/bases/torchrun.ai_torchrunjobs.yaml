@@ -18,8 +18,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.jobQueue
-      name: JobQueue
+    - jsonPath: .spec.queue
+      name: Queue
       type: string
     - jsonPath: .spec.numNodes
       name: Nodes
@@ -179,9 +179,6 @@ spec:
                   - name
                   type: object
                 type: array
-              jobQueue:
-                description: Name of the JobQueue to use for this job
-                type: string
               labels:
                 additionalProperties:
                   type: string
@@ -192,6 +189,9 @@ spec:
                   and maxNodes to be equal.
                 minimum: 1
                 type: integer
+              queue:
+                description: Name of the TorchrunQueue to use for this job
+                type: string
               reliability:
                 description: Reliability and lifecycle settings
                 properties:
@@ -1982,7 +1982,7 @@ spec:
                 type: object
             required:
             - command
-            - jobQueue
+            - queue
             type: object
           status:
             description: TorchrunJobStatus defines the observed state of TorchrunJob

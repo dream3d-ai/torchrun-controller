@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	torchrunv1alpha1 "github.com/dream3d/torchrun-controller/internal/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // TorchrunQueueReconciler reconciles a TorchrunQueue object
@@ -27,6 +29,9 @@ type TorchrunQueueReconciler struct {
 //+kubebuilder:rbac:groups=torchrun.ai,resources=torchrunqueues/finalizers,verbs=update
 //+kubebuilder:rbac:groups=scheduling.run.ai,resources=queues,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update
+// Add RBAC for managing queue resources
+//+kubebuilder:rbac:groups=core,resources=persistentvolumeclaims;configmaps;secrets;services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=*,resources=*,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles the reconciliation loop for JobQueue
 func (r *TorchrunQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -36,9 +41,15 @@ func (r *TorchrunQueueReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var jobQueue torchrunv1alpha1.TorchrunQueue
 	if err := r.Get(ctx, req.NamespacedName, &jobQueue); err != nil {
 		if errors.IsNotFound(err) {
-			// JobQueue was deleted, delete the corresponding kai-scheduler Queue
+			// JobQueue was deleted, cleanup will happen via owner references
 			return r.deleteKaiQueue(ctx, req.Name)
 		}
+		return ctrl.Result{}, err
+	}
+
+	// Create or update queue resources
+	if err := r.reconcileQueueResources(ctx, &jobQueue); err != nil {
+		log.Error(err, "Failed to reconcile queue resources")
 		return ctrl.Result{}, err
 	}
 
@@ -55,6 +66,74 @@ func (r *TorchrunQueueReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// reconcileQueueResources creates or updates the resources defined in the queue
+func (r *TorchrunQueueReconciler) reconcileQueueResources(ctx context.Context, jobQueue *torchrunv1alpha1.TorchrunQueue) error {
+	log := log.FromContext(ctx)
+
+	for _, resourceTemplate := range jobQueue.Spec.Resources {
+		// Parse the resource template
+		obj := &unstructured.Unstructured{}
+		if err := json.Unmarshal(resourceTemplate.Template.Raw, obj); err != nil {
+			return fmt.Errorf("failed to unmarshal resource template %s: %w", resourceTemplate.Name, err)
+		}
+
+		// Set metadata
+		resourceName := resourceTemplate.Name
+		if resourceTemplate.NameMode == "prefix" {
+			resourceName = fmt.Sprintf("%s-%s", jobQueue.Name, resourceTemplate.Name)
+		}
+
+		obj.SetName(resourceName)
+		obj.SetNamespace(jobQueue.Namespace)
+
+		// Add labels
+		labels := obj.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels["torchrun.ai/managed-by"] = "torchrunqueue-controller"
+		labels["torchrun.ai/queue"] = jobQueue.Name
+		obj.SetLabels(labels)
+
+		// Set owner reference
+		ownerRef := metav1.OwnerReference{
+			APIVersion:         jobQueue.APIVersion,
+			Kind:               jobQueue.Kind,
+			Name:               jobQueue.Name,
+			UID:                jobQueue.UID,
+			Controller:         &[]bool{true}[0],
+			BlockOwnerDeletion: &[]bool{true}[0],
+		}
+		obj.SetOwnerReferences([]metav1.OwnerReference{ownerRef})
+
+		// Check if resource exists
+		existing := &unstructured.Unstructured{}
+		existing.SetGroupVersionKind(obj.GroupVersionKind())
+		err := r.Get(ctx, client.ObjectKey{Name: resourceName, Namespace: jobQueue.Namespace}, existing)
+
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// Create the resource
+				log.Info("Creating queue resource", "kind", obj.GetKind(), "name", resourceName)
+				if err := r.Create(ctx, obj); err != nil {
+					return fmt.Errorf("failed to create resource %s: %w", resourceName, err)
+				}
+			} else {
+				return fmt.Errorf("failed to get resource %s: %w", resourceName, err)
+			}
+		} else if !resourceTemplate.Immutable {
+			// Update the resource (preserve resource version)
+			obj.SetResourceVersion(existing.GetResourceVersion())
+			log.Info("Updating queue resource", "kind", obj.GetKind(), "name", resourceName)
+			if err := r.Update(ctx, obj); err != nil {
+				return fmt.Errorf("failed to update resource %s: %w", resourceName, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // createOrUpdateKaiQueue creates or updates the kai-scheduler Queue resource
@@ -244,5 +323,9 @@ func (r *TorchrunQueueReconciler) addCondition(jobQueue *torchrunv1alpha1.Torchr
 func (r *TorchrunQueueReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&torchrunv1alpha1.TorchrunQueue{}).
+		// Watch for owned resources
+		Owns(&corev1.PersistentVolumeClaim{}).
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Secret{}).
 		Complete(r)
 }

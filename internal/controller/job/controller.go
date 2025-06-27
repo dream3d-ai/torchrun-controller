@@ -47,10 +47,10 @@ func (r *TorchrunJobReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Fetch the referenced JobQueue
 	var jobQueue torchrunv1alpha1.TorchrunQueue
 	if err := r.Get(ctx, types.NamespacedName{
-		Name:      job.Spec.JobQueue,
+		Name:      job.Spec.Queue,
 		Namespace: job.Namespace,
 	}, &jobQueue); err != nil {
-		log.Error(err, "Failed to get JobQueue", "name", job.Spec.JobQueue)
+		log.Error(err, "Failed to get JobQueue", "name", job.Spec.Queue)
 		job.Status.Phase = torchrunv1alpha1.PhaseFailed
 		return ctrl.Result{}, r.Status().Update(ctx, &job)
 	}

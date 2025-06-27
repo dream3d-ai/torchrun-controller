@@ -1,10 +1,11 @@
-
 apiVersion: torchrun.ai/v1alpha1
 kind: TorchrunJob
 metadata:
   namespace: default
+  name: example-training-job
 spec:
   queue: dev
+  numNodes: 1
   command: python train.py --lr=0.001
   setupCommand: |
     uv sync --active && cd /app/models

@@ -1,43 +1,3 @@
----
-# TODO: allow arbitrary resource creation for queues with owner references
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: juicefs-datasets
-  namespace: default
-  ownerReferences:
-    - apiVersion: torchrun.ai/v1alpha1
-      kind: TorchrunQueue
-      name: dev
-      # The UID should be set by the controller or manually after creation
-      uid: 37a81f9d-af1e-4cca-b28e-a37571cf629e
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: juicefs-sc-datasets
-  resources:
-    requests:
-      storage: 10000000Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: juicefs-checkpoints
-  namespace: default
-  ownerReferences:
-    - apiVersion: torchrun.ai/v1alpha1
-      kind: TorchrunQueue
-      name: dev
-      # The UID should be set by the controller or manually after creation
-      uid: 37a81f9d-af1e-4cca-b28e-a37571cf629e
-spec:
-  accessModes:
-    - ReadWriteMany
-  storageClassName: juicefs-sc-checkpoints
-  resources:
-    requests:
-      storage: 10000000Gi
----
 apiVersion: torchrun.ai/v1alpha1
 kind: TorchrunQueue
 metadata:
@@ -61,6 +21,33 @@ spec:
         limit: -1
         overQuotaWeight: 1
   serviceAccountName: default
+  resources:
+    - name: datasets
+      template:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: juicefs-datasets
+        spec:
+          accessModes:
+            - ReadWriteMany
+          storageClassName: juicefs-sc-datasets
+          resources:
+            requests:
+              storage: 10000000Gi
+    - name: checkpoints
+      template:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: juicefs-checkpoints
+        spec:
+          accessModes:
+            - ReadWriteMany
+          storageClassName: juicefs-sc-checkpoints
+          resources:
+            requests:
+              storage: 10000000Gi
   podTemplate:
     metadata:
       labels:
@@ -105,4 +92,116 @@ spec:
         - name: checkpoints
           persistentVolumeClaim:
             claimName: juicefs-checkpoints
+---
+apiVersion: torchrun.ai/v1alpha1
+kind: TorchrunQueue
+metadata:
+  name: fault-tolerant
+  namespace: default
+spec:
+  queue:
+    name: fault-tolerant
+    parentQueue: default
+    resources:
+      cpu:
+        quota: -1
+        limit: -1
+        overQuotaWeight: 1
+      gpu:
+        quota: -1
+        limit: -1
+        overQuotaWeight: 1
+      memory:
+        quota: -1
+        limit: -1
+        overQuotaWeight: 1
+  serviceAccountName: default
+  resources:
+    - name: datasets
+      template:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: juicefs-datasets-ft
+        spec:
+          accessModes:
+            - ReadWriteMany
+          storageClassName: juicefs-sc-datasets
+          resources:
+            requests:
+              storage: 10000000Gi
+    - name: checkpoints
+      template:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: juicefs-checkpoints-ft
+        spec:
+          accessModes:
+            - ReadWriteMany
+          storageClassName: juicefs-sc-checkpoints
+          resources:
+            requests:
+              storage: 10000000Gi
+  podTemplate:
+    metadata:
+      labels:
+        queue: fault-tolerant
+      annotations: {}
+    spec:
+      hostNetwork: true
+      hostIPC: true
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Equal"
+          effect: "NoSchedule"
+      containers:
+        - name: trainer
+          image: dream3dml/pytorch:latest
+          resources:
+            requests:
+              nvidia.com/gpu: 8
+              cpu: 64
+              memory: 500Gi
+              ephemeral-storage: 300Gi
+            limits:
+              nvidia.com/gpu: 8
+              cpu: 64
+              memory: 500Gi
+              ephemeral-storage: 300Gi
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+            - name: datasets
+              mountPath: /jfs/datasets
+            - name: checkpoints
+              mountPath: /jfs/checkpoints
+        - name: lighthouse
+          image: dream3dml/lighthouse:latest
+          resources:
+            requests:
+              cpu: 1
+              memory: 1Gi
+            limits:
+              cpu: 1
+              memory: 1Gi
+          volumeMounts:
+            - name: lighthouse-data
+              mountPath: /data
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Gi
+        - name: lighthouse-data
+          emptyDir:
+            medium: Memory
+            sizeLimit: 100Gi
+        - name: datasets
+          persistentVolumeClaim:
+            claimName: juicefs-datasets-ft
+        - name: checkpoints
+          persistentVolumeClaim:
+            claimName: juicefs-checkpoints-ft
+
 

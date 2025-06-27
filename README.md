@@ -31,23 +31,45 @@ kind: TorchrunQueue
 metadata:
   name: gpu-training-queue
 spec:
-  kaiQueue: "gpu-training" # kai-scheduler queue name
-  parentKaiQueue: "default" # parent queue in kai-scheduler hierarchy
-  nodeResources:
-    gpus: 8 # GPUs per node
-    cpus: 96 # CPUs per node
-    memory: "512Gi" # Memory per node
-  image: "pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime"
-  storage:
-    workspace:
-      enabled: true
-      sizePerGPU: "10Gi"
-    checkpoints:
-      enabled: true
-      sizePerGPU: "50Gi"
-  scheduling:
-    scheduler: "kai-scheduler"
-    priorityClassName: "gpu-priority"
+  queue:
+    name: "gpu-training" # kai-scheduler queue name
+    parentQueue: "default" # parent queue in kai-scheduler hierarchy
+    resources:
+      gpu:
+        quota: -1 # -1 means unlimited
+        limit: -1
+        overQuotaWeight: 1
+      cpu:
+        quota: -1
+        limit: -1
+        overQuotaWeight: 1
+      memory:
+        quota: -1
+        limit: -1
+        overQuotaWeight: 1
+  distributed:
+    backend: "nccl"
+    rdzvBackend: "etcd-v2"
+    rdzvEndpoint: "etcd.etcd-system.svc.cluster.local:2379"
+    port: 29500
+  podTemplate:
+    metadata:
+      labels:
+        queue: gpu-training
+    spec:
+      containers:
+        - name: trainer
+          image: "pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime"
+          resources:
+            requests:
+              nvidia.com/gpu: 8
+              cpu: 96
+              memory: "512Gi"
+            limits:
+              nvidia.com/gpu: 8
+              cpu: 96
+              memory: "512Gi"
+  serviceAccountName: "default"
 ```
 
 ### TorchrunJob Controller
@@ -77,12 +99,21 @@ metadata:
   name: training-job
 spec:
   jobQueue: gpu-training-queue # Reference to TorchrunQueue
-  numGPUs: 16 # Total GPUs needed
+  numNodes: 2 # Number of nodes (not GPUs)
   command: "python train.py --epochs 100"
-  distributed:
-    backend: "nccl"
-    rdzvBackend: "etcd-v2"
-  # Local workspace from kubectl-torchrun plugin is automatically mounted
+  setupCommand: "pip install -r requirements.txt" # Optional setup
+  workspaceStorage:
+    size: "20Gi"
+    mountPath: "/app"
+    source: "zip" # Local workspace from kubectl-torchrun plugin
+  reliability:
+    maxRestarts: 3
+    restartPolicy: "OnFailure"
+    ttlSecondsAfterFinished: 3600
+  # Additional environment variables can be specified
+  env:
+    - name: WANDB_API_KEY
+      value: "your-api-key"
 ```
 
 ## Installation
@@ -157,22 +188,50 @@ kind: TorchrunQueue
 metadata:
   name: h100-training
 spec:
-  kaiQueue: gpu-h100-queue # Maps to kai-scheduler queue
-  image: dream3dml/pytorch:latest
-  nodeResources:
-    cpus: 128 # Total CPUs per node
-    memory: "1024Gi" # Total memory per node
-    gpus: 8 # Total GPUs per node
-    gpuType: "h100-80gb"
-  scheduling:
-    scheduler: kai-scheduler
-    nodeSelector:
-      gpu.nvidia.com/class: H100
-  storage:
-    shmSizePerGPU: "8Gi"
-    workspace:
-      enabled: true
-      sizePerGPU: "10Gi"
+  queue:
+    name: gpu-h100-queue # Maps to kai-scheduler queue
+    parentQueue: default
+    resources:
+      gpu:
+        quota: -1
+        limit: -1
+      cpu:
+        quota: -1
+        limit: -1
+      memory:
+        quota: -1
+        limit: -1
+  distributed:
+    backend: nccl
+    rdzvBackend: etcd-v2
+    rdzvEndpoint: "etcd.etcd-system.svc.cluster.local:2379"
+  podTemplate:
+    metadata:
+      labels:
+        node-type: h100
+    spec:
+      nodeSelector:
+        gpu.nvidia.com/class: H100
+      containers:
+        - name: trainer
+          image: dream3dml/pytorch:latest
+          resources:
+            requests:
+              nvidia.com/gpu: 8
+              cpu: 128
+              memory: "1024Gi"
+            limits:
+              nvidia.com/gpu: 8
+              cpu: 128
+              memory: "1024Gi"
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Gi
 ```
 
 ### 2. Submit a TorchrunJob
@@ -185,10 +244,14 @@ metadata:
 spec:
   jobQueue: h100-training
   command: "python train.py --model vit_large"
-  numGPUs: 32 # Will use 4 nodes with 8 GPUs each
-  distributed:
-    backend: nccl
-    rdzvBackend: etcd-v2
+  numNodes: 4 # Will use 4 nodes with 8 GPUs each
+  workspaceStorage:
+    size: "100Gi"
+    source: "zip"
+    mountPath: "/app"
+  reliability:
+    maxRestarts: 3
+    restartPolicy: "OnFailure"
 ```
 
 ### 3. Monitor the Job
@@ -217,7 +280,7 @@ cd ~/my-training-project
 # Submit job with local workspace
 kubectl torchrun submit \
   --queue h100-training \
-  --gpus 8 \
+  --num-nodes 1 \
   "python train.py --epochs 10"
 ```
 
@@ -236,7 +299,7 @@ vim train.py
 # Submit another job - changes are included
 kubectl torchrun submit \
   --queue h100-training \
-  --gpus 8 \
+  --num-nodes 1 \
   "python train.py --epochs 20"
 ```
 
@@ -251,11 +314,23 @@ kind: TorchrunQueue
 metadata:
   name: dev-queue
 spec:
-  nodeResources:
-    gpus: 4
-    cpus: 32
-    memory: "128Gi"
-  image: pytorch/pytorch:latest
+  queue:
+    name: dev
+    parentQueue: default
+  podTemplate:
+    spec:
+      containers:
+        - name: trainer
+          image: pytorch/pytorch:latest
+          resources:
+            requests:
+              nvidia.com/gpu: 4
+              cpu: 32
+              memory: "128Gi"
+            limits:
+              nvidia.com/gpu: 4
+              cpu: 32
+              memory: "128Gi"
 ---
 # Production queue - full resources, optimized settings
 apiVersion: torchrun.ai/v1alpha1
@@ -263,24 +338,44 @@ kind: TorchrunQueue
 metadata:
   name: prod-queue
 spec:
-  nodeResources:
-    gpus: 8
-    cpus: 96
-    memory: "512Gi"
-  image: company/pytorch-optimized:latest
-  scheduling:
-    priorityClassName: production-priority
+  queue:
+    name: production
+    parentQueue: default
+    resources:
+      gpu:
+        quota: 64 # Reserve 64 GPUs for production
+  distributed:
+    backend: nccl
+    rdzvBackend: etcd-v2
+  podTemplate:
+    metadata:
+      labels:
+        tier: production
+    spec:
+      priorityClassName: production-priority
+      containers:
+        - name: trainer
+          image: company/pytorch-optimized:latest
+          resources:
+            requests:
+              nvidia.com/gpu: 8
+              cpu: 96
+              memory: "512Gi"
+            limits:
+              nvidia.com/gpu: 8
+              cpu: 96
+              memory: "512Gi"
 ```
 
 ## Features
 
-### Flexible GPU Distribution
+### Flexible Node Distribution
 
-The controller automatically calculates optimal pod distribution:
+The controller manages distributed training across nodes:
 
 - Single node if possible (better performance)
 - Multiple nodes when needed (scales out)
-- Handles partial node utilization
+- Each node runs the number of GPUs defined in the TorchrunQueue pod template
 
 ### Storage Management
 
