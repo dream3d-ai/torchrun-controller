@@ -1,0 +1,87 @@
+apiVersion: torchrun.ai/v1alpha1
+kind: TorchrunQueue
+metadata:
+  name: training-queue
+spec:
+  queue:
+    name: ml-training
+    parentQueue: default
+    resources:
+      cpu:
+        quota: 100
+        limit: 200
+      gpu:
+        quota: 8
+        limit: 16
+      memory:
+        quota: 1000
+        limit: 2000
+  distributed:
+    backend: nccl
+    rdzvBackend: etcd-v2
+    rdzvEndpoint: etcd.etcd-system.svc.cluster.local:2379
+    port: 29500
+  podTemplate:
+    metadata:
+      labels:
+        team: ml-research
+        environment: training
+      annotations:
+        scheduler: kai-scheduler
+    spec:
+      # First container MUST be named "trainer" - validation happens in controller
+      containers:
+      - name: trainer  # Required name for first container
+        image: pytorch/pytorch:2.0.0-cuda11.7-cudnn8-runtime
+        command: ["torchrun"]
+        args: ["--help"]
+        resources:
+          requests:
+            memory: "16Gi"
+            cpu: "4"
+            nvidia.com/gpu: "1"
+          limits:
+            memory: "32Gi"
+            cpu: "8"
+            nvidia.com/gpu: "1"
+      # Additional containers are allowed
+      - name: sidecar
+        image: busybox
+        command: ["sleep", "infinity"]
+      nodeSelector:
+        node.kubernetes.io/instance-type: gpu-node
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+  serviceAccountName: torchrun-sa
+  resources:
+  # Example PVC for shared storage
+  - name: training-data
+    nameMode: prefix
+    template:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      spec:
+        accessModes:
+        - ReadWriteMany
+        resources:
+          requests:
+            storage: 100Gi
+        storageClassName: fast-ssd
+  # Example ConfigMap for training configs
+  - name: training-config
+    nameMode: exact
+    immutable: true
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      data:
+        config.yaml: |
+          model:
+            type: transformer
+            layers: 12
+            hidden_size: 768
+          training:
+            batch_size: 32
+            learning_rate: 0.001 

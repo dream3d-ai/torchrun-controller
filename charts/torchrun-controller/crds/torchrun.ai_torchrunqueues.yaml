@@ -12,7 +12,7 @@ spec:
     listKind: TorchrunQueueList
     plural: torchrunqueues
     shortNames:
-    - jq
+    - trq
     singular: torchrunqueue
   scope: Namespaced
   versions:
@@ -21,7 +21,7 @@ spec:
       name: Queue
       type: string
     - jsonPath: .status.phase
-      name: Ready
+      name: Phase
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -51,6 +51,37 @@ spec:
           spec:
             description: JobQueueSpec defines the desired state of JobQueue
             properties:
+              distributed:
+                description: Distributed training configuration
+                properties:
+                  backend:
+                    default: nccl
+                    description: PyTorch distributed backend
+                    enum:
+                    - nccl
+                    - gloo
+                    - mpi
+                    type: string
+                  port:
+                    default: 29500
+                    description: Port for distributed training
+                    format: int32
+                    maximum: 65535
+                    minimum: 1024
+                    type: integer
+                  rdzvBackend:
+                    default: etcd-v2
+                    description: Rendezvous backend for torchrun
+                    enum:
+                    - etcd-v2
+                    - c10d
+                    - static
+                    type: string
+                  rdzvEndpoint:
+                    default: etcd.etcd-system.svc.cluster.local:2379
+                    description: Rendezvous endpoint (e.g., etcd service)
+                    type: string
+                type: object
               podTemplate:
                 description: Pod template configuration
                 properties:
@@ -69,8 +100,9 @@ spec:
                         type: object
                     type: object
                   spec:
-                    description: Pod spec template - can contain any valid pod spec
-                      fields
+                    description: |-
+                      Pod spec template - must contain a container named "trainer" as the first container
+                      The trainer container is reserved for the main training workload
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                 type: object
@@ -140,6 +172,39 @@ spec:
                 required:
                 - name
                 type: object
+              resources:
+                description: Resources to be created for this queue (PVCs, ConfigMaps,
+                  Secrets, etc.)
+                items:
+                  description: ResourceTemplate defines a Kubernetes resource to be
+                    created for the queue
+                  properties:
+                    immutable:
+                      default: false
+                      description: Immutable indicates if the resource should not
+                        be updated after creation
+                      type: boolean
+                    name:
+                      description: Name of the resource (will be used as-is or as
+                        a prefix)
+                      type: string
+                    nameMode:
+                      default: exact
+                      description: NameMode defines how the name should be used
+                      enum:
+                      - exact
+                      - prefix
+                      type: string
+                    template:
+                      description: The resource object - can be any valid Kubernetes
+                        resource
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - name
+                  - template
+                  type: object
+                type: array
               serviceAccountName:
                 default: default
                 description: Service account name
@@ -196,6 +261,32 @@ spec:
                 - Updating
                 - Terminating
                 type: string
+              resourceStatuses:
+                description: ResourceStatus tracks the status of each resource
+                items:
+                  description: ResourceStatus tracks the status of a queue resource
+                  properties:
+                    kind:
+                      description: Kind of the resource
+                      type: string
+                    message:
+                      description: Message provides additional information
+                      type: string
+                    name:
+                      description: Name of the resource
+                      type: string
+                    ready:
+                      description: Ready indicates if the resource is ready
+                      type: boolean
+                  required:
+                  - kind
+                  - name
+                  - ready
+                  type: object
+                type: array
+              resourcesReady:
+                description: ResourcesReady indicates if all queue resources are ready
+                type: boolean
             type: object
         type: object
     served: true

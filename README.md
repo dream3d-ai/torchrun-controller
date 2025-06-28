@@ -112,6 +112,52 @@ spec:
   serviceAccountName: "default"
 ```
 
+### Reserved Container: "trainer"
+
+The TorchrunQueue pod template **must** define a container named "trainer" as the first container. This is enforced by the TorchrunQueue controller during reconciliation:
+
+- **Required**: Every TorchrunQueue must have a "trainer" container as the first container in the pod spec
+- **Controller Validation**: The controller validates this requirement and will mark the queue as invalid if not met
+- **Reserved Name**: The name "trainer" is reserved and cannot be used for any other container
+- **Execution Target**: The torchrun command and training workload will execute in this container
+- **Resource Definition**: GPU, CPU, and memory resources for training should be defined on this container
+- **Workspace Mount**: The job workspace will be automatically mounted in this container
+- **Environment Variables**: Job-specific environment variables will be injected into this container
+
+**Validation Behavior**:
+
+- If the first container is not named "trainer", the controller will:
+  - Set the TorchrunQueue status condition `Valid` to `False`
+  - Add an error message explaining the validation failure
+  - Prevent jobs from being submitted to this queue until fixed
+
+Example trainer container definition:
+
+```yaml
+containers:
+  - name: trainer # REQUIRED: Must be named "trainer" and be the first container
+    image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+    resources:
+      requests:
+        nvidia.com/gpu: 8 # GPU allocation per node
+        cpu: 96
+        memory: "512Gi"
+    # Command and args will be overridden by the TorchrunJob
+    # Volume mounts can be defined here and will be preserved
+```
+
+Additional containers can be added for sidecar services (monitoring, logging, etc.), but they cannot be named "trainer".
+
+**Invalid Example** (will be rejected by controller):
+
+```yaml
+containers:
+  - name: worker # ERROR: First container must be named "trainer"
+    image: pytorch/pytorch:latest
+  - name: trainer # Having "trainer" as non-first container is invalid
+    image: pytorch/pytorch:latest
+```
+
 ### TorchrunJob Controller
 
 The TorchrunJob controller manages actual training job instances. It:

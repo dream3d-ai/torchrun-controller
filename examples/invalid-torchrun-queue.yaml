@@ -1,0 +1,19 @@
+# This example demonstrates an INVALID TorchrunQueue configuration
+# The controller will reject this because the first container is not named "trainer"
+apiVersion: torchrun.ai/v1alpha1
+kind: TorchrunQueue
+metadata:
+  name: invalid-queue
+spec:
+  queue:
+    name: test-queue
+  podTemplate:
+    spec:
+      containers:
+      # ERROR: First container MUST be named "trainer"
+      - name: worker  # This will cause validation to fail
+        image: pytorch/pytorch:latest
+        command: ["python"]
+      - name: trainer  # Having "trainer" as second container is not valid
+        image: pytorch/pytorch:latest
+        command: ["torchrun"] 

@@ -21,33 +21,6 @@ spec:
         limit: -1
         overQuotaWeight: 1
   serviceAccountName: default
-  resources:
-    - name: datasets
-      template:
-        apiVersion: v1
-        kind: PersistentVolumeClaim
-        metadata:
-          name: juicefs-datasets
-        spec:
-          accessModes:
-            - ReadWriteMany
-          storageClassName: juicefs-sc-datasets
-          resources:
-            requests:
-              storage: 10000000Gi
-    - name: checkpoints
-      template:
-        apiVersion: v1
-        kind: PersistentVolumeClaim
-        metadata:
-          name: juicefs-checkpoints
-        spec:
-          accessModes:
-            - ReadWriteMany
-          storageClassName: juicefs-sc-checkpoints
-          resources:
-            requests:
-              storage: 10000000Gi
   podTemplate:
     metadata:
       labels:
@@ -88,120 +61,14 @@ spec:
             sizeLimit: 512Gi
         - name: datasets
           persistentVolumeClaim:
-            claimName: juicefs-datasets
+            claimName: juicefs-pvc-datasets
         - name: checkpoints
           persistentVolumeClaim:
-            claimName: juicefs-checkpoints
----
-apiVersion: torchrun.ai/v1alpha1
-kind: TorchrunQueue
-metadata:
-  name: fault-tolerant
-  namespace: default
-spec:
-  queue:
-    name: fault-tolerant
-    parentQueue: default
-    resources:
-      cpu:
-        quota: -1
-        limit: -1
-        overQuotaWeight: 1
-      gpu:
-        quota: -1
-        limit: -1
-        overQuotaWeight: 1
-      memory:
-        quota: -1
-        limit: -1
-        overQuotaWeight: 1
-  serviceAccountName: default
-  resources:
-    - name: datasets
-      template:
-        apiVersion: v1
-        kind: PersistentVolumeClaim
-        metadata:
-          name: juicefs-datasets-ft
-        spec:
-          accessModes:
-            - ReadWriteMany
-          storageClassName: juicefs-sc-datasets
-          resources:
-            requests:
-              storage: 10000000Gi
-    - name: checkpoints
-      template:
-        apiVersion: v1
-        kind: PersistentVolumeClaim
-        metadata:
-          name: juicefs-checkpoints-ft
-        spec:
-          accessModes:
-            - ReadWriteMany
-          storageClassName: juicefs-sc-checkpoints
-          resources:
-            requests:
-              storage: 10000000Gi
-  podTemplate:
-    metadata:
-      labels:
-        queue: fault-tolerant
-      annotations: {}
-    spec:
-      hostNetwork: true
-      hostIPC: true
-      tolerations:
-        - key: "nvidia.com/gpu"
-          operator: "Equal"
-          effect: "NoSchedule"
-      containers:
-        - name: trainer
-          image: dream3dml/pytorch:latest
-          resources:
-            requests:
-              nvidia.com/gpu: 8
-              cpu: 64
-              memory: 500Gi
-              ephemeral-storage: 300Gi
-            limits:
-              nvidia.com/gpu: 8
-              cpu: 64
-              memory: 500Gi
-              ephemeral-storage: 300Gi
-          volumeMounts:
-            - name: dshm
-              mountPath: /dev/shm
-            - name: datasets
-              mountPath: /jfs/datasets
-            - name: checkpoints
-              mountPath: /jfs/checkpoints
-        - name: lighthouse
-          image: dream3dml/lighthouse:latest
-          resources:
-            requests:
-              cpu: 1
-              memory: 1Gi
-            limits:
-              cpu: 1
-              memory: 1Gi
-          volumeMounts:
-            - name: lighthouse-data
-              mountPath: /data
-      volumes:
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 512Gi
-        - name: lighthouse-data
-          emptyDir:
-            medium: Memory
-            sizeLimit: 100Gi
-        - name: datasets
-          persistentVolumeClaim:
-            claimName: juicefs-datasets-ft
-        - name: checkpoints
-          persistentVolumeClaim:
-            claimName: juicefs-checkpoints-ft
-
-
+            claimName: juicefs-pvc-checkpoints
+  workspaceStorage:
+    size: 1Gi
+    source: zip
+    storageClass: csi-s3
+  distributed:
+    rdzvBackend: etcd-v2
+    rdzvEndpoint: etcd.etcd-system.svc.cluster.local:2379

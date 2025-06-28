@@ -70,7 +70,7 @@ spec:
                     minimum: 1024
                     type: integer
                   rdzvBackend:
-                    default: etcd-v2
+                    default: c10d
                     description: Rendezvous backend for torchrun
                     enum:
                     - etcd-v2
@@ -100,8 +100,9 @@ spec:
                         type: object
                     type: object
                   spec:
-                    description: Pod spec template - can contain any valid pod spec
-                      fields
+                    description: |-
+                      Pod spec template - must contain a container named "trainer" as the first container
+                      The trainer container is reserved for the main training workload
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                 type: object
@@ -208,6 +209,41 @@ spec:
                 default: default
                 description: Service account name
                 type: string
+              workspaceStorage:
+                description: Workspace storage configuration
+                properties:
+                  image:
+                    default: alpine/git:latest
+                    description: Image to use for workspace sync
+                    type: string
+                  imagePullPolicy:
+                    default: IfNotPresent
+                    description: Image pull policy for sync image
+                    type: string
+                  mountPath:
+                    default: /app
+                    description: Mount path for destination workspace
+                    type: string
+                  size:
+                    default: 1Gi
+                    description: Default size of the workspace storage
+                    type: string
+                  source:
+                    default: zip
+                    description: Workspace source type
+                    enum:
+                    - zip
+                    - git
+                    - s3
+                    - existing
+                    type: string
+                  storageClass:
+                    description: Storage class for the workspace storage
+                    type: string
+                  url:
+                    description: URL for git/s3 sources
+                    type: string
+                type: object
             required:
             - queue
             type: object

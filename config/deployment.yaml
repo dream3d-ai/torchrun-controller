@@ -32,6 +32,7 @@ spec:
         args:
         - --leader-elect
         image: dream3dml/torchrun-controller:latest
+        imagePullPolicy: Always
         name: manager
         securityContext:
           allowPrivilegeEscalation: false

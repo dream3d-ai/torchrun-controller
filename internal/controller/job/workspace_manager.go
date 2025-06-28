@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,16 +29,60 @@ func NewWorkspaceManager(client client.Client) *WorkspaceManager {
 	}
 }
 
+// getDefaultStorageClass finds the default StorageClass in the cluster
+func (wm *WorkspaceManager) getDefaultStorageClass(ctx context.Context) (string, error) {
+	storageClasses := &storagev1.StorageClassList{}
+	if err := wm.client.List(ctx, storageClasses); err != nil {
+		return "", fmt.Errorf("failed to list storage classes: %w", err)
+	}
+
+	for _, sc := range storageClasses.Items {
+		if sc.Annotations != nil && sc.Annotations["storageclass.kubernetes.io/is-default-class"] == "true" {
+			return sc.Name, nil
+		}
+	}
+
+	return "", fmt.Errorf("no default storage class found in the cluster")
+}
+
 // CreateWorkspacePVC creates the workspace PVC
 func (wm *WorkspaceManager) CreateWorkspacePVC(ctx context.Context, job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue) error {
 	log := log.FromContext(ctx)
 
+	// Determine storage class to use, with job override taking precedence over jq
+	storageClassName := ""
+	if job.Spec.WorkspaceStorage.StorageClass != "" {
+		storageClassName = job.Spec.WorkspaceStorage.StorageClass
+	} else {
+		storageClassName = jq.Spec.WorkspaceStorage.StorageClass
+	}
+	if storageClassName == "" {
+		// Look up the default storage class
+		defaultSC, err := wm.getDefaultStorageClass(ctx)
+		if err != nil {
+			log.Error(err, "Failed to find default storage class")
+			return err
+		}
+		storageClassName = defaultSC
+		log.Info("Using default storage class", "storageClass", storageClassName)
+	}
+
+	// Storage size, with job override taking precedence over jq
+	storageSize := ""
+	if job.Spec.WorkspaceStorage.Size != "" {
+		storageSize = job.Spec.WorkspaceStorage.Size
+	} else if jq.Spec.WorkspaceStorage.Size != "" {
+		storageSize = jq.Spec.WorkspaceStorage.Size
+	} else {
+		storageSize = "1Gi"
+	}
+
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-workspace", job.Name),
+			Name:      GetWorkspacePVCName(job),
 			Namespace: job.Namespace,
 			Labels: map[string]string{
-				"torchrun.ai/job-name":       job.Name,
+				"torchrun.ai/job-name":       job.Spec.JobName,
 				"torchrun.ai/type":           "workspace",
 				"torchrun.ai/sync-completed": "false",
 			},
@@ -46,13 +91,14 @@ func (wm *WorkspaceManager) CreateWorkspacePVC(ctx context.Context, job *torchru
 			},
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
-			StorageClassName: &job.Spec.WorkspaceStorage.StorageClass,
+			StorageClassName: &storageClassName,
 			AccessModes: []corev1.PersistentVolumeAccessMode{
 				corev1.ReadWriteOnce,
+				corev1.ReadOnlyMany,
 			},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse(job.Spec.WorkspaceStorage.Size),
+					corev1.ResourceStorage: resource.MustParse(storageSize),
 				},
 			},
 		},
@@ -68,7 +114,7 @@ func (wm *WorkspaceManager) CreateWorkspacePVC(ctx context.Context, job *torchru
 		return err
 	}
 
-	log.Info("Creating workspace PVC", "name", pvc.Name)
+	log.Info("Creating workspace PVC", "name", pvc.Name, "storageClass", storageClassName)
 	return wm.client.Create(ctx, pvc)
 }
 
@@ -79,10 +125,10 @@ func (wm *WorkspaceManager) CreateSyncPod(ctx context.Context, job *torchrunv1al
 	// Build sync pod
 	syncPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-sync", job.Name),
+			Name:      GetSyncPodName(job),
 			Namespace: job.Namespace,
 			Labels: map[string]string{
-				"torchrun.ai/job-name": job.Name,
+				"torchrun.ai/job-name": job.Spec.JobName,
 				"torchrun.ai/role":     "sync",
 			},
 			OwnerReferences: []metav1.OwnerReference{
@@ -95,9 +141,9 @@ func (wm *WorkspaceManager) CreateSyncPod(ctx context.Context, job *torchrunv1al
 			Containers: []corev1.Container{
 				{
 					Name:            "sync",
-					Image:           job.Spec.WorkspaceStorage.Image,
-					ImagePullPolicy: job.Spec.WorkspaceStorage.ImagePullPolicy,
-					Command:         []string{"/bin/bash", "-c"},
+					Image:           jq.Spec.WorkspaceStorage.Image,
+					ImagePullPolicy: jq.Spec.WorkspaceStorage.ImagePullPolicy,
+					Command:         []string{"/bin/sh", "-c"},
 					Args:            []string{wm.buildSyncCommand(job, jq)},
 					WorkingDir:      "/workspace",
 					Env:             wm.buildSyncEnvironment(job, jq),
@@ -109,12 +155,12 @@ func (wm *WorkspaceManager) CreateSyncPod(ctx context.Context, job *torchrunv1al
 					},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("1"),
-							corev1.ResourceMemory: resource.MustParse("2Gi"),
+							corev1.ResourceCPU:    resource.MustParse("100m"),
+							corev1.ResourceMemory: resource.MustParse("1Gi"),
 						},
 						Limits: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("2"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
+							corev1.ResourceCPU:    resource.MustParse("200m"),
+							corev1.ResourceMemory: resource.MustParse("2Gi"),
 						},
 					},
 				},
@@ -124,7 +170,7 @@ func (wm *WorkspaceManager) CreateSyncPod(ctx context.Context, job *torchrunv1al
 					Name: "workspace",
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: fmt.Sprintf("%s-workspace", job.Name),
+							ClaimName: GetWorkspacePVCName(job),
 						},
 					},
 				},
@@ -144,7 +190,7 @@ func (wm *WorkspaceManager) CreateSyncPod(ctx context.Context, job *torchrunv1al
 
 	// Check if workspace PVC exists
 	workspacePVC := &corev1.PersistentVolumeClaim{}
-	err = wm.client.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("%s-workspace", job.Name), Namespace: job.Namespace}, workspacePVC)
+	err = wm.client.Get(ctx, types.NamespacedName{Name: GetWorkspacePVCName(job), Namespace: job.Namespace}, workspacePVC)
 	if err != nil {
 		return err
 	}
@@ -162,7 +208,7 @@ func (wm *WorkspaceManager) CreateSyncPod(ctx context.Context, job *torchrunv1al
 // CheckWorkspacePVCStatus checks if the workspace PVC is ready by checking the sync-completed label,
 // and if not, checks if the sync pod has completed and sets the label if so.
 func (wm *WorkspaceManager) CheckWorkspacePVCStatus(ctx context.Context, job *torchrunv1alpha1.TorchrunJob) (bool, error) {
-	pvcName := fmt.Sprintf("%s-workspace", job.Name)
+	pvcName := GetWorkspacePVCName(job)
 	workspacePVC := &corev1.PersistentVolumeClaim{}
 	err := wm.client.Get(ctx, types.NamespacedName{Name: pvcName, Namespace: job.Namespace}, workspacePVC)
 	if err != nil {
@@ -175,7 +221,7 @@ func (wm *WorkspaceManager) CheckWorkspacePVCStatus(ctx context.Context, job *to
 	}
 
 	// Check if sync pod exists and has completed successfully
-	syncPodName := fmt.Sprintf("%s-sync", job.Name)
+	syncPodName := GetSyncPodName(job)
 	syncPod := &corev1.Pod{}
 	err = wm.client.Get(ctx, types.NamespacedName{Name: syncPodName, Namespace: job.Namespace}, syncPod)
 	if err != nil {
@@ -186,9 +232,10 @@ func (wm *WorkspaceManager) CheckWorkspacePVCStatus(ctx context.Context, job *to
 		return false, err
 	}
 
-	// If sync pod succeeded, set the label on the PVC
-	if syncPod.Status.Phase == corev1.PodSucceeded {
-		// Patch the PVC to add the label
+	// Check sync pod status
+	switch syncPod.Status.Phase {
+	case corev1.PodSucceeded:
+		// Sync pod succeeded, set the label on the PVC
 		patch := client.MergeFrom(workspacePVC.DeepCopy())
 		if workspacePVC.Labels == nil {
 			workspacePVC.Labels = map[string]string{}
@@ -198,9 +245,16 @@ func (wm *WorkspaceManager) CheckWorkspacePVCStatus(ctx context.Context, job *to
 			return false, err
 		}
 		return true, nil
-	}
 
-	return false, nil
+	case corev1.PodFailed:
+		// Sync pod failed, we should mark this as an error
+		// The controller will need to handle this appropriately
+		return false, fmt.Errorf("sync pod failed: %s", syncPod.Status.Message)
+
+	default:
+		// Pod is still running or pending
+		return false, nil
+	}
 }
 
 // buildSyncCommand builds the sync command based on workspace source
@@ -212,6 +266,9 @@ func (wm *WorkspaceManager) buildSyncCommand(job *torchrunv1alpha1.TorchrunJob, 
 	if job.Spec.WorkspaceStorage.Source != "" {
 		source = job.Spec.WorkspaceStorage.Source
 		url = job.Spec.WorkspaceStorage.URL
+	} else {
+		source = jq.Spec.WorkspaceStorage.Source
+		url = jq.Spec.WorkspaceStorage.URL
 	}
 
 	// Default to zip source if not specified
@@ -222,17 +279,30 @@ func (wm *WorkspaceManager) buildSyncCommand(job *torchrunv1alpha1.TorchrunJob, 
 	switch source {
 	case "zip":
 		if url == "" {
-			// Default behavior - wait for workspace.zip to be uploaded
 			return `
-				echo "Waiting for workspace.zip to be uploaded..."
-				while [ ! -f /workspace/workspace.zip ]; do
+				echo "Waiting for workspace.zip to be uploaded (timeout: 10 minutes)..."
+				start_time=$(date +%s)
+				timeout_seconds=600   # 10 minutes
+
+				while true; do
+					if [ -f /workspace/workspace.zip ]; then
+						if unzip -t /workspace/workspace.zip >/dev/null 2>&1; then
+							break   # valid archive, proceed
+						fi
+						echo "workspace.zip detected but still copying – waiting..."
+					fi
+
+					# check timeout
+					current_time=$(date +%s)
+					elapsed=$((current_time - start_time))
+					if [ "$elapsed" -ge "$timeout_seconds" ]; then
+						echo "ERROR: Timed out waiting for workspace.zip to finish uploading"
+						exit 1
+					fi
+
 					sleep 5
 				done
-				echo "Validating workspace.zip..."
-				if ! unzip -t /workspace/workspace.zip > /dev/null 2>&1; then
-					echo "ERROR: workspace.zip is corrupted or invalid"
-					exit 1
-				fi
+
 				echo "Extracting workspace.zip..."
 				unzip -q /workspace/workspace.zip -d /workspace/
 				rm -f /workspace/workspace.zip
@@ -253,8 +323,8 @@ func (wm *WorkspaceManager) buildSyncCommand(job *torchrunv1alpha1.TorchrunJob, 
 
 	case "git":
 		ref := "main"
-		if job.Spec.WorkspaceStorage.URL != "" {
-			ref = job.Spec.WorkspaceStorage.URL
+		if url != "" {
+			ref = url
 		}
 		return fmt.Sprintf(`
 			echo "Cloning git repository %s..."
@@ -287,9 +357,7 @@ func (wm *WorkspaceManager) buildSyncCommand(job *torchrunv1alpha1.TorchrunJob, 
 
 // buildSyncEnvironment builds environment variables for sync pod
 func (wm *WorkspaceManager) buildSyncEnvironment(job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue) []corev1.EnvVar {
-	env := []corev1.EnvVar{
-		{Name: "TORCHRUN_JOB_NAME", Value: job.Name},
-	}
+	env := []corev1.EnvVar{}
 
 	// Add job environment variables that might be needed for sync
 	for _, e := range job.Spec.Env {

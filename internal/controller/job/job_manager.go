@@ -31,6 +31,12 @@ func NewJobManager(client client.Client) *JobManager {
 }
 
 // CreateJob creates the Kubernetes Job for training
+// The pod template from the TorchrunQueue must contain a container named "trainer" as the first container.
+// This is a reserved container name where:
+// - The torchrun command will be executed
+// - The workspace will be mounted
+// - Environment variables will be injected
+// - The main training workload will run
 func (jm *JobManager) CreateJob(ctx context.Context, job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue) error {
 	log := log.FromContext(ctx)
 
@@ -45,6 +51,11 @@ func (jm *JobManager) CreateJob(ctx context.Context, job *torchrunv1alpha1.Torch
 		return err
 	}
 
+	// Translate resource names in volumes based on TorchrunQueue resources
+	if err := jm.translateResourceNames(&podSpec, jq); err != nil {
+		return err
+	}
+
 	// Set scheduler name
 	podSpec.SchedulerName = "kai-scheduler"
 
@@ -52,7 +63,7 @@ func (jm *JobManager) CreateJob(ctx context.Context, job *torchrunv1alpha1.Torch
 	podSpec.RestartPolicy = corev1.RestartPolicy(job.Spec.Reliability.RestartPolicy)
 
 	// Attach the workspace to the trainer container
-	jm.attachWorkspaceToTrainer(job, &podSpec)
+	jm.attachWorkspaceToTrainer(job, jq, &podSpec)
 
 	// Build trainer command
 	jm.attachTrainerCommand(job, jq, &podSpec)
@@ -72,11 +83,10 @@ func (jm *JobManager) CreateJob(ctx context.Context, job *torchrunv1alpha1.Torch
 			Name:      job.Name,
 			Namespace: job.Namespace,
 			Labels: map[string]string{
-				"app":                     "torchrun",
-				"torchrun.ai/job-id":      job.Status.JobID,
-				"torchrun.ai/job-name":    job.Status.JobName,
-				"torchrun.ai/job-queue":   job.Spec.Queue,
-				"scheduling.kai.io/queue": jq.Spec.Queue.Name,
+				"app":                   "torchrun",
+				"torchrun.ai/job-id":    job.Spec.JobID,
+				"torchrun.ai/job-name":  job.Spec.JobName,
+				"torchrun.ai/job-queue": job.Spec.Queue,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(job, job.GroupVersionKind()),
@@ -116,8 +126,8 @@ func (jm *JobManager) CreateJob(ctx context.Context, job *torchrunv1alpha1.Torch
 	return jm.client.Create(ctx, k8sJob)
 }
 
-// buildTorchrunCommand builds the torchrun command
-func (jm *JobManager) buildTorchrunCommand(job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue, podSpec *corev1.PodSpec) string {
+// attachTrainerCommand builds the torchrun command and attaches it to the trainer container
+func (jm *JobManager) attachTrainerCommand(job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue, podSpec *corev1.PodSpec) {
 	var cmdParts []string
 
 	// Add setup command if provided
@@ -139,46 +149,34 @@ func (jm *JobManager) buildTorchrunCommand(job *torchrunv1alpha1.TorchrunJob, jq
 		}
 	}
 
+	// if RdzvBackend is empty set it to c10d
+	if jq.Spec.Distributed.RdzvBackend == "" {
+		jq.Spec.Distributed.RdzvBackend = "c10d"
+	}
+
 	// Node configuration
 	if job.Spec.NumNodes > 1 {
 		cmdParts = append(cmdParts,
 			"--node_rank", "$(JOB_COMPLETION_INDEX)",
 			"--nnodes", strconv.Itoa(job.Spec.NumNodes),
-			"--nproc_per_node", strconv.Itoa(nproc),
-			"--rdzv_backend", jq.Spec.Distributed.RdzvBackend,
-			"--rdzv_endpoint", jq.Spec.Distributed.RdzvEndpoint,
-			"--rdzv_id", job.Status.JobID,
+			"--nproc-per-node", strconv.Itoa(nproc),
+			"--rdzv-backend", jq.Spec.Distributed.RdzvBackend,
+			"--rdzv-endpoint", jq.Spec.Distributed.RdzvEndpoint,
+			"--rdzv-id", job.Spec.JobName,
 			"--no-python",
 		)
 	} else {
 		// Single node training
 		cmdParts = append(cmdParts,
 			"--standalone",
-			"--nproc_per_node", strconv.Itoa(nproc),
-			"--rdzv_backend", jq.Spec.Distributed.RdzvBackend,
-			"--rdzv_endpoint", jq.Spec.Distributed.RdzvEndpoint,
-			"--rdzv_id", job.Status.JobID,
+			"--nproc-per-node", strconv.Itoa(nproc),
+			"--rdzv-id", job.Spec.JobName,
 			"--no-python",
 		)
 	}
 
 	// Add the actual command
 	cmdParts = append(cmdParts, job.Spec.Command)
-
-	return strings.Join(cmdParts, " ")
-}
-
-// attachTrainerCommand builds the torchrun command and attaches it to the trainer container
-func (jm *JobManager) attachTrainerCommand(job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue, podSpec *corev1.PodSpec) {
-	var cmdParts []string
-
-	// Add the setup command if provided
-	if job.Spec.SetupCommand != "" {
-		cmdParts = append(cmdParts, job.Spec.SetupCommand, "&&")
-	}
-
-	// Add the torchrun command
-	cmdParts = append(cmdParts, jm.buildTorchrunCommand(job, jq, podSpec))
 
 	podSpec.Containers[0].Command = []string{"/bin/bash", "-c", strings.Join(cmdParts, " ")}
 }
@@ -209,15 +207,15 @@ func (jm *JobManager) attachVolumes(job *torchrunv1alpha1.TorchrunJob, jq *torch
 }
 
 // attachWorkspaceToTrainer attaches the workspace to the trainer container
-func (jm *JobManager) attachWorkspaceToTrainer(job *torchrunv1alpha1.TorchrunJob, podSpec *corev1.PodSpec) {
+func (jm *JobManager) attachWorkspaceToTrainer(job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue, podSpec *corev1.PodSpec) {
 	// Attach the workspace pvc to the init container to copy files to the workspace volume
 	podSpec.InitContainers = append(podSpec.InitContainers, corev1.Container{
 		Name:            "workspace-sync",
 		Image:           "alpine:3.18",
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         []string{"/bin/bash", "-c"},
+		Command:         []string{"/bin/sh", "-c"},
 		Args: []string{
-			fmt.Sprintf("while [ ! -f /workspace-pvc/.sync_success ]; do echo 'Waiting for workspace sync...'; sleep 5; done; cp -r /workspace-pvc/* %s", job.Spec.WorkspaceStorage.MountPath),
+			fmt.Sprintf("while [ ! -f /workspace-pvc/.sync_success ]; do echo 'Waiting for workspace sync...'; sleep 5; done; cp -r /workspace-pvc/* %s", jq.Spec.WorkspaceStorage.MountPath),
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
@@ -227,7 +225,7 @@ func (jm *JobManager) attachWorkspaceToTrainer(job *torchrunv1alpha1.TorchrunJob
 			},
 			{
 				Name:      "workspace",
-				MountPath: job.Spec.WorkspaceStorage.MountPath,
+				MountPath: jq.Spec.WorkspaceStorage.MountPath,
 			},
 		},
 	})
@@ -235,7 +233,7 @@ func (jm *JobManager) attachWorkspaceToTrainer(job *torchrunv1alpha1.TorchrunJob
 	// Attach the workspace volume to the trainer container
 	podSpec.Containers[0].VolumeMounts = append(podSpec.Containers[0].VolumeMounts, corev1.VolumeMount{
 		Name:      "workspace",
-		MountPath: job.Spec.WorkspaceStorage.MountPath,
+		MountPath: jq.Spec.WorkspaceStorage.MountPath,
 	})
 
 	// Workspace PVC
@@ -243,7 +241,7 @@ func (jm *JobManager) attachWorkspaceToTrainer(job *torchrunv1alpha1.TorchrunJob
 		Name: "workspace-pvc",
 		VolumeSource: corev1.VolumeSource{
 			PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-				ClaimName: fmt.Sprintf("%s-workspace", job.Name),
+				ClaimName: GetWorkspacePVCName(job),
 			},
 		},
 	})
@@ -264,9 +262,18 @@ func (jm *JobManager) validatePodSpec(podSpec corev1.PodSpec) error {
 		return fmt.Errorf("pod spec must have at least one container")
 	}
 
-	// The first container must be named "trainer"
+	// The first container must be named "trainer" - this is a reserved container name
+	// The trainer container is where the torchrun command will be executed
+	// and where the main training workload will run
 	if podSpec.Containers[0].Name != "trainer" {
-		return fmt.Errorf("pod spec must have a container named 'trainer'")
+		return fmt.Errorf("first container must be named 'trainer' (this is a reserved container name for the training workload)")
+	}
+
+	// Validate that no other container is named "trainer"
+	for i := 1; i < len(podSpec.Containers); i++ {
+		if podSpec.Containers[i].Name == "trainer" {
+			return fmt.Errorf("only the first container can be named 'trainer'")
+		}
 	}
 
 	return nil
@@ -275,10 +282,11 @@ func (jm *JobManager) validatePodSpec(podSpec corev1.PodSpec) error {
 // buildPodLabels builds the pod labels
 func (jm *JobManager) buildPodLabels(job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue) map[string]string {
 	labels := map[string]string{
-		"app":                     "torchrun",
-		"torchrun.ai/job-name":    job.Name,
-		"torchrun.ai/job-queue":   job.Spec.Queue,
-		"scheduling.kai.io/queue": jq.Spec.Queue.Name,
+		"app":                   "torchrun",
+		"torchrun.ai/job-id":    job.Spec.JobID,
+		"torchrun.ai/job-name":  job.Spec.JobName,
+		"torchrun.ai/job-queue": job.Spec.Queue,
+		"kai.scheduler/queue":   jq.Spec.Queue.Name,
 	}
 
 	// Add user-specified labels
@@ -292,7 +300,9 @@ func (jm *JobManager) buildPodLabels(job *torchrunv1alpha1.TorchrunJob, jq *torc
 // buildPodAnnotations builds the pod annotations
 func (jm *JobManager) buildPodAnnotations(job *torchrunv1alpha1.TorchrunJob, jq *torchrunv1alpha1.TorchrunQueue) map[string]string {
 	annotations := map[string]string{
-		"torchrun.ai/job-id": job.Status.JobID,
+		"torchrun.ai/job-id":    job.Spec.JobID,
+		"torchrun.ai/job-name":  job.Spec.JobName,
+		"torchrun.ai/job-queue": job.Spec.Queue,
 	}
 
 	// Add user-specified annotations
@@ -303,7 +313,55 @@ func (jm *JobManager) buildPodAnnotations(job *torchrunv1alpha1.TorchrunJob, jq 
 	return annotations
 }
 
-// completionModePtr returns a pointer to a completion mode
-func completionModePtr(mode batchv1.CompletionMode) *batchv1.CompletionMode {
-	return &mode
+// translateResourceNames translates resource names in pod volumes based on TorchrunQueue resource definitions
+// For resources with nameMode=prefix, it replaces the original names with prefixed names
+func (jm *JobManager) translateResourceNames(podSpec *corev1.PodSpec, jq *torchrunv1alpha1.TorchrunQueue) error {
+	// Build a map of original resource names to their actual names
+	resourceNameMap := make(map[string]string)
+
+	for _, resource := range jq.Spec.Resources {
+		// Parse the resource template to get the original name
+		var resourceObj map[string]interface{}
+		if err := json.Unmarshal(resource.Template.Raw, &resourceObj); err != nil {
+			return fmt.Errorf("failed to unmarshal resource template %s: %w", resource.Name, err)
+		}
+
+		// Get metadata.name from the template
+		metadata, ok := resourceObj["metadata"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		originalName, ok := metadata["name"].(string)
+		if !ok {
+			continue
+		}
+
+		// Determine the actual resource name based on nameMode
+		actualName := resource.Name
+		if resource.NameMode == "prefix" {
+			actualName = fmt.Sprintf("%s-%s", jq.Name, resource.Name)
+		}
+
+		// Map original name to actual name
+		resourceNameMap[originalName] = actualName
+	}
+
+	// Update volume references in the pod spec
+	for i := range podSpec.Volumes {
+		volume := &podSpec.Volumes[i]
+
+		// Check if this volume references a PVC
+		if volume.PersistentVolumeClaim != nil {
+			claimName := volume.PersistentVolumeClaim.ClaimName
+
+			// Check if this claim name needs to be translated
+			if actualName, found := resourceNameMap[claimName]; found {
+				// Volume reference will be updated from original to actual name
+				volume.PersistentVolumeClaim.ClaimName = actualName
+			}
+		}
+	}
+
+	return nil
 }

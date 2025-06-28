@@ -7,9 +7,10 @@ import (
 
 // TorchrunJob phase constants
 const (
-	PhaseRunning   = "Running"
 	PhasePending   = "Pending"
 	PhaseSyncing   = "Syncing"
+	PhaseQueued    = "Queued"
+	PhaseRunning   = "Running"
 	PhaseSucceeded = "Succeeded"
 	PhaseSuspended = "Suspended"
 	PhaseDeleted   = "Deleted"
@@ -24,6 +25,15 @@ type TorchrunJobSpec struct {
 	// Name of the TorchrunQueue to use for this job
 	Queue string `json:"queue"`
 
+	// Application-level job name for this TorchrunJob.
+	// Used as the rendezvous id (rdz-id) for torchrun and for features like job resumption.
+	// If not provided, a random friendly name will be generated.
+	JobName string `json:"jobName"`
+
+	// Universally unique identifier (UUID) for this TorchrunJob.
+	// Used to uniquely identify the job instance.
+	JobID string `json:"jobID"`
+
 	// Training command to execute
 	Command string `json:"command"`
 
@@ -34,8 +44,8 @@ type TorchrunJobSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	NumNodes int `json:"numNodes,omitempty"`
 
-	// Workspace storage configuration
-	WorkspaceStorage WorkspaceStorage `json:"workspaceStorage,omitempty"`
+	// Overrides for storage configuration
+	WorkspaceStorage WorkspaceStorageConfig `json:"workspaceStorage,omitempty"`
 
 	// Reliability and lifecycle settings
 	Reliability ReliabilityConfig `json:"reliability,omitempty"`
@@ -55,35 +65,6 @@ type TorchrunJobSpec struct {
 
 	// Labels to add to worker pods
 	Labels map[string]string `json:"labels,omitempty"`
-}
-
-// WorkspaceStorage defines workspace storage configuration
-type WorkspaceStorage struct {
-	// Size per GPU
-	// +kubebuilder:default="10Gi"
-	Size string `json:"size,omitempty"`
-
-	// Image to use for workspace
-	Image string `json:"image,omitempty"`
-
-	// Image pull policy for sync image
-	// +kubebuilder:default="IfNotPresent"
-	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
-
-	// Mount path for workspace
-	// +kubebuilder:default="/app"
-	MountPath string `json:"mountPath,omitempty"`
-
-	// Workspace source type
-	// +kubebuilder:validation:Enum=zip;git;s3;existing
-	// +kubebuilder:default="zip"
-	Source string `json:"source,omitempty"`
-
-	// URL for git/s3 sources
-	URL string `json:"url,omitempty"`
-
-	// Storage class name
-	StorageClass string `json:"storageClass,omitempty"`
 }
 
 // ReliabilityConfig defines reliability and lifecycle settings
@@ -139,12 +120,6 @@ type TorchrunJobStatus struct {
 	// +kubebuilder:validation:Enum=Running;Pending;Syncing;Succeeded;Suspended;Deleted;Failed;TimedOut;Preempted;Unknown
 	Phase string `json:"phase,omitempty"`
 
-	// Generated unique job ID
-	JobID string `json:"jobID,omitempty"`
-
-	// Name of the job
-	JobName string `json:"jobName,omitempty"`
-
 	// Number of nodes for training
 	NumNodes int `json:"numNodes,omitempty"`
 
@@ -191,7 +166,7 @@ type WorkerStatus struct {
 // TorchrunJobCondition describes the state of a TorchrunJob at a certain point
 type TorchrunJobCondition struct {
 	// Type of condition
-	// +kubebuilder:validation:Enum=Provisioned;WorkspaceReady;AllWorkersReady;Completed
+	// +kubebuilder:validation:Enum=Provisioned;WorkspaceReady;WorkspaceSync;AllWorkersReady;Completed;JobCreated;QueueNotFound;Failed
 	Type string `json:"type"`
 
 	// Status of the condition

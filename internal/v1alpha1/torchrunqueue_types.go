@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -15,6 +16,9 @@ type JobQueueSpec struct {
 
 	// Pod template configuration
 	PodTemplateConfig PodTemplateConfig `json:"podTemplate,omitempty"`
+
+	// Workspace storage configuration
+	WorkspaceStorage WorkspaceStorageConfig `json:"workspaceStorage,omitempty"`
 
 	// Service account name
 	// +kubebuilder:default="default"
@@ -73,7 +77,7 @@ type DistributedConfig struct {
 
 	// Rendezvous backend for torchrun
 	// +kubebuilder:validation:Enum=etcd-v2;c10d;static
-	// +kubebuilder:default="etcd-v2"
+	// +kubebuilder:default="c10d"
 	RdzvBackend string `json:"rdzvBackend,omitempty"`
 
 	// Rendezvous endpoint (e.g., etcd service)
@@ -92,10 +96,41 @@ type PodTemplateConfig struct {
 	// Metadata to be added to pod
 	Metadata PodMetadata `json:"metadata,omitempty"`
 
-	// Pod spec template - can contain any valid pod spec fields
+	// Pod spec template - must contain a container named "trainer" as the first container
+	// The trainer container is reserved for the main training workload
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Type=object
 	Spec runtime.RawExtension `json:"spec,omitempty"`
+}
+
+// WorkspaceStorage defines workspace storage configuration
+type WorkspaceStorageConfig struct {
+	// Default size of the workspace storage
+	// +kubebuilder:default="1Gi"
+	Size string `json:"size,omitempty"`
+
+	// Image to use for workspace sync
+	// +kubebuilder:default="alpine/git:latest"
+	Image string `json:"image,omitempty"`
+
+	// Image pull policy for sync image
+	// +kubebuilder:default="IfNotPresent"
+	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
+	// Mount path for destination workspace
+	// +kubebuilder:default="/app"
+	MountPath string `json:"mountPath,omitempty"`
+
+	// Storage class for the workspace storage
+	StorageClass string `json:"storageClass,omitempty"`
+
+	// Workspace source type
+	// +kubebuilder:validation:Enum=zip;git;s3;existing
+	// +kubebuilder:default="zip"
+	Source string `json:"source,omitempty"`
+
+	// URL for git/s3 sources
+	URL string `json:"url,omitempty"`
 }
 
 // PodMetadata defines metadata for pods

@@ -179,6 +179,17 @@ spec:
                   - name
                   type: object
                 type: array
+              jobID:
+                description: |-
+                  Universally unique identifier (UUID) for this TorchrunJob.
+                  Used to uniquely identify the job instance.
+                type: string
+              jobName:
+                description: |-
+                  Application-level job name for this TorchrunJob.
+                  Used as the rendezvous id (rdz-id) for torchrun and for features like job resumption.
+                  If not provided, a random friendly name will be generated.
+                type: string
               labels:
                 additionalProperties:
                   type: string
@@ -1947,10 +1958,11 @@ spec:
                     type: array
                 type: object
               workspaceStorage:
-                description: Workspace storage configuration
+                description: Overrides for storage configuration
                 properties:
                   image:
-                    description: Image to use for workspace
+                    default: alpine/git:latest
+                    description: Image to use for workspace sync
                     type: string
                   imagePullPolicy:
                     default: IfNotPresent
@@ -1958,11 +1970,11 @@ spec:
                     type: string
                   mountPath:
                     default: /app
-                    description: Mount path for workspace
+                    description: Mount path for destination workspace
                     type: string
                   size:
-                    default: 10Gi
-                    description: Size per GPU
+                    default: 1Gi
+                    description: Default size of the workspace storage
                     type: string
                   source:
                     default: zip
@@ -1974,7 +1986,7 @@ spec:
                     - existing
                     type: string
                   storageClass:
-                    description: Storage class name
+                    description: Storage class for the workspace storage
                     type: string
                   url:
                     description: URL for git/s3 sources
@@ -1982,6 +1994,8 @@ spec:
                 type: object
             required:
             - command
+            - jobID
+            - jobName
             - queue
             type: object
           status:
@@ -2019,20 +2033,18 @@ spec:
                       enum:
                       - Provisioned
                       - WorkspaceReady
+                      - WorkspaceSync
                       - AllWorkersReady
                       - Completed
+                      - JobCreated
+                      - QueueNotFound
+                      - Failed
                       type: string
                   required:
                   - status
                   - type
                   type: object
                 type: array
-              jobID:
-                description: Generated unique job ID
-                type: string
-              jobName:
-                description: Name of the job
-                type: string
               lastReconcileTime:
                 description: Last time the job was reconciled
                 format: date-time

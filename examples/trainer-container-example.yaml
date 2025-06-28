@@ -1,0 +1,73 @@
+# Example demonstrating the trainer container requirement
+# The trainer container is a reserved container name in TorchrunQueue pod templates
+apiVersion: torchrun.ai/v1alpha1
+kind: TorchrunQueue
+metadata:
+  name: example-queue
+  namespace: default
+spec:
+  queue:
+    name: example
+    parentQueue: default
+  podTemplate:
+    metadata:
+      labels:
+        queue: example
+    spec:
+      # REQUIRED: First container must be named "trainer"
+      # This is where the torchrun command will execute
+      containers:
+        - name: trainer  # Reserved container name - MUST be first
+          image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+          resources:
+            requests:
+              nvidia.com/gpu: 4
+              cpu: 32
+              memory: "128Gi"
+            limits:
+              nvidia.com/gpu: 4
+              cpu: 32
+              memory: "128Gi"
+          # The following will be automatically configured by the controller:
+          # - Command (torchrun with proper arguments)
+          # - Workspace volume mount
+          # - Environment variables from the job
+          # - Additional volume mounts from the job
+          
+          # You can define base volume mounts here that all jobs will inherit
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+        
+        # Optional: Additional sidecar containers for monitoring, logging, etc.
+        # These containers CANNOT be named "trainer"
+        - name: metrics-exporter
+          image: prom/node-exporter:latest
+          resources:
+            requests:
+              cpu: 0.5
+              memory: "512Mi"
+          ports:
+            - containerPort: 9100
+              name: metrics
+      
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Gi
+---
+# Example of an invalid configuration that would be rejected
+# This will fail CRD validation because the first container is not named "trainer"
+# apiVersion: torchrun.ai/v1alpha1
+# kind: TorchrunQueue
+# metadata:
+#   name: invalid-queue
+# spec:
+#   queue:
+#     name: invalid
+#   podTemplate:
+#     spec:
+#       containers:
+#         - name: worker  # ERROR: First container must be named "trainer"
+#           image: pytorch/pytorch:latest 

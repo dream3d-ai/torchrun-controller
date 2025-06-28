@@ -18,8 +18,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.jobQueue
-      name: JobQueue
+    - jsonPath: .spec.queue
+      name: Queue
       type: string
     - jsonPath: .spec.numNodes
       name: Nodes
@@ -66,37 +66,6 @@ spec:
               command:
                 description: Training command to execute
                 type: string
-              distributed:
-                description: Distributed training configuration
-                properties:
-                  backend:
-                    default: nccl
-                    description: PyTorch distributed backend
-                    enum:
-                    - nccl
-                    - gloo
-                    - mpi
-                    type: string
-                  port:
-                    default: 29500
-                    description: Port for distributed training
-                    format: int32
-                    maximum: 65535
-                    minimum: 1024
-                    type: integer
-                  rdzvBackend:
-                    default: etcd-v2
-                    description: Rendezvous backend for torchrun
-                    enum:
-                    - etcd-v2
-                    - c10d
-                    - static
-                    type: string
-                  rdzvEndpoint:
-                    default: etcd.etcd-system.svc.cluster.local:2379
-                    description: Rendezvous endpoint (e.g., etcd service)
-                    type: string
-                type: object
               env:
                 description: Additional environment variables (merged with JobQueue
                   env)
@@ -210,8 +179,16 @@ spec:
                   - name
                   type: object
                 type: array
-              jobQueue:
-                description: Name of the JobQueue to use for this job
+              jobID:
+                description: |-
+                  Universally unique identifier (UUID) for this TorchrunJob.
+                  Used to uniquely identify the job instance.
+                type: string
+              jobName:
+                description: |-
+                  Application-level job name for this TorchrunJob.
+                  Used as the rendezvous id (rdz-id) for torchrun and for features like job resumption.
+                  If not provided, a random friendly name will be generated.
                 type: string
               labels:
                 additionalProperties:
@@ -223,6 +200,9 @@ spec:
                   and maxNodes to be equal.
                 minimum: 1
                 type: integer
+              queue:
+                description: Name of the TorchrunQueue to use for this job
+                type: string
               reliability:
                 description: Reliability and lifecycle settings
                 properties:
@@ -1977,14 +1957,11 @@ spec:
                       type: object
                     type: array
                 type: object
-              workingDir:
-                default: /app
-                description: Working directory (overrides JobQueue default)
-                type: string
               workspaceStorage:
                 description: Workspace storage configuration
                 properties:
                   image:
+                    default: alpine/git:latest
                     description: Image to use for workspace
                     type: string
                   imagePullPolicy:
@@ -1996,7 +1973,7 @@ spec:
                     description: Mount path for workspace
                     type: string
                   size:
-                    default: 10Gi
+                    default: 1Gi
                     description: Size per GPU
                     type: string
                   source:
@@ -2009,15 +1986,20 @@ spec:
                     - existing
                     type: string
                   storageClass:
+                    default: default
                     description: Storage class name
                     type: string
                   url:
                     description: URL for git/s3 sources
                     type: string
+                required:
+                - storageClass
                 type: object
             required:
             - command
-            - jobQueue
+            - jobID
+            - jobName
+            - queue
             type: object
           status:
             description: TorchrunJobStatus defines the observed state of TorchrunJob
@@ -2054,26 +2036,21 @@ spec:
                       enum:
                       - Provisioned
                       - WorkspaceReady
+                      - WorkspaceSync
                       - AllWorkersReady
                       - Completed
+                      - JobCreated
+                      - QueueNotFound
+                      - Failed
                       type: string
                   required:
                   - status
                   - type
                   type: object
                 type: array
-              jobID:
-                description: Generated unique job ID
-                type: string
-              jobName:
-                description: Name of the job
-                type: string
               lastReconcileTime:
                 description: Last time the job was reconciled
                 format: date-time
-                type: string
-              masterEndpoint:
-                description: Master endpoint for distributed training
                 type: string
               numNodes:
                 description: Number of nodes for training

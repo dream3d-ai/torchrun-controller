@@ -47,6 +47,17 @@ func (r *TorchrunQueueReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
+	// Validate the pod spec
+	if err := r.validatePodSpec(ctx, &jobQueue); err != nil {
+		log.Error(err, "Pod spec validation failed")
+		// Update status with validation error
+		r.addCondition(&jobQueue, "Valid", "False", "ValidationError", err.Error())
+		if updateErr := r.Status().Update(ctx, &jobQueue); updateErr != nil {
+			log.Error(updateErr, "Failed to update status after validation error")
+		}
+		return ctrl.Result{}, err
+	}
+
 	// Create or update queue resources
 	if err := r.reconcileQueueResources(ctx, &jobQueue); err != nil {
 		log.Error(err, "Failed to reconcile queue resources")
@@ -66,6 +77,45 @@ func (r *TorchrunQueueReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// validatePodSpec validates the pod spec template
+func (r *TorchrunQueueReconciler) validatePodSpec(ctx context.Context, jobQueue *torchrunv1alpha1.TorchrunQueue) error {
+	// If no pod spec is provided, it's valid (optional)
+	if jobQueue.Spec.PodTemplateConfig.Spec.Raw == nil {
+		return nil
+	}
+
+	// Parse the pod spec
+	var podSpec map[string]interface{}
+	if err := json.Unmarshal(jobQueue.Spec.PodTemplateConfig.Spec.Raw, &podSpec); err != nil {
+		return fmt.Errorf("failed to unmarshal pod spec: %w", err)
+	}
+
+	// Check for containers field
+	containersRaw, ok := podSpec["containers"]
+	if !ok {
+		return fmt.Errorf("pod spec must have a 'containers' field")
+	}
+
+	// Convert to array
+	containers, ok := containersRaw.([]interface{})
+	if !ok || len(containers) == 0 {
+		return fmt.Errorf("pod spec must have at least one container")
+	}
+
+	// Check first container name
+	firstContainer, ok := containers[0].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid container specification")
+	}
+
+	name, ok := firstContainer["name"].(string)
+	if !ok || name != "trainer" {
+		return fmt.Errorf("first container must be named 'trainer', got: %s", name)
+	}
+
+	return nil
 }
 
 // reconcileQueueResources creates or updates the resources defined in the queue
@@ -155,7 +205,7 @@ func (r *TorchrunQueueReconciler) createOrUpdateKaiQueue(ctx context.Context, jo
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Create the Queue
-			log.Info("Creating kai-scheduler Queue", "name", jobQueue.Spec.Queue)
+			log.Info("Creating kai-scheduler Queue", "name", jobQueue.Spec.Queue.Name)
 			return r.Create(ctx, kaiQueue)
 		}
 		return err
@@ -203,7 +253,7 @@ func (r *TorchrunQueueReconciler) buildKaiQueue(jobQueue *torchrunv1alpha1.Torch
 			"apiVersion": "scheduling.run.ai/v2",
 			"kind":       "Queue",
 			"metadata": map[string]interface{}{
-				"name": jobQueue.Spec.Queue,
+				"name": jobQueue.Spec.Queue.Name,
 				"labels": map[string]interface{}{
 					"torchrun.ai/managed-by": "jobqueue-controller",
 					"torchrun.ai/jobqueue":   jobQueue.Name,
@@ -271,6 +321,9 @@ func (r *TorchrunQueueReconciler) updateStatus(ctx context.Context, jobQueue *to
 	jobQueue.Status.LastUpdateTime = &now
 	jobQueue.Status.ObservedGeneration = jobQueue.Generation
 
+	// Add validation passed condition
+	r.addCondition(jobQueue, "Valid", "True", "ValidationPassed", "Pod spec validation passed")
+
 	// Check if kai-scheduler Queue exists and is ready
 	kaiQueue := &unstructured.Unstructured{}
 	kaiQueue.SetGroupVersionKind(schema.GroupVersionKind{
@@ -289,6 +342,60 @@ func (r *TorchrunQueueReconciler) updateStatus(ctx context.Context, jobQueue *to
 		}
 	} else {
 		r.addCondition(jobQueue, "QueueReady", "True", "QueueExists", "Kai-scheduler Queue is ready")
+	}
+
+	// Check resource statuses
+	resourcesReady := true
+	jobQueue.Status.ResourceStatuses = []torchrunv1alpha1.ResourceStatus{}
+
+	for _, resourceTemplate := range jobQueue.Spec.Resources {
+		resourceName := resourceTemplate.Name
+		if resourceTemplate.NameMode == "prefix" {
+			resourceName = fmt.Sprintf("%s-%s", jobQueue.Name, resourceTemplate.Name)
+		}
+
+		// Parse the template to get the kind
+		var obj map[string]interface{}
+		if err := json.Unmarshal(resourceTemplate.Template.Raw, &obj); err != nil {
+			continue
+		}
+
+		kind, _ := obj["kind"].(string)
+
+		// Check if resource exists
+		resourceObj := &unstructured.Unstructured{}
+		resourceObj.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   "", // Core API group
+			Version: "v1",
+			Kind:    kind,
+		})
+
+		err := r.Get(ctx, client.ObjectKey{Name: resourceName, Namespace: jobQueue.Namespace}, resourceObj)
+		status := torchrunv1alpha1.ResourceStatus{
+			Name:  resourceName,
+			Kind:  kind,
+			Ready: err == nil,
+		}
+
+		if err != nil {
+			resourcesReady = false
+			if errors.IsNotFound(err) {
+				status.Message = "Resource not found"
+			} else {
+				status.Message = fmt.Sprintf("Failed to get resource: %v", err)
+			}
+		} else {
+			status.Message = "Resource is ready"
+		}
+
+		jobQueue.Status.ResourceStatuses = append(jobQueue.Status.ResourceStatuses, status)
+	}
+
+	jobQueue.Status.ResourcesReady = resourcesReady
+	if resourcesReady {
+		r.addCondition(jobQueue, "ResourcesReady", "True", "AllResourcesReady", "All queue resources are ready")
+	} else {
+		r.addCondition(jobQueue, "ResourcesReady", "False", "ResourcesNotReady", "Some queue resources are not ready")
 	}
 
 	return r.Status().Update(ctx, jobQueue)

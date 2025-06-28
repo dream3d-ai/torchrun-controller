@@ -163,7 +163,7 @@ spec:
     - --epochs=10
     - --batch-size=32
   workspace:
-    size: 10Gi
+    size: 1Gi
   resources:
     requests:
       nvidia.com/gpu: 1
